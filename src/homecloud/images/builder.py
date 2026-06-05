@@ -10,7 +10,7 @@ from homecloud.images.registry import get_image
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.state import (
     get_built_template,
-    get_ssh_public_key,
+    get_ssh_public_keys,
     hydrate_registry,
     set_built_template,
 )
@@ -35,8 +35,8 @@ class ImageBuilder:
         if spec is None:
             raise ValueError(f"Unknown image: {image_id}")
 
-        ssh_key = get_ssh_public_key()
-        if not ssh_key:
+        ssh_keys = get_ssh_public_keys()
+        if not ssh_keys:
             raise ValueError(
                 "Complete setup and upload your SSH public key before building the base image"
             )
@@ -54,8 +54,9 @@ class ImageBuilder:
             "base-image.yaml.j2",
             hostname=name,
             ssh_user=settings.vm_ssh_user,
+            ssh_public_keys=ssh_keys,
         )
-        self._apply_cloudinit(vmid, user_data, sshkeys=ssh_key)
+        self._apply_cloudinit(vmid, user_data, sshkeys=ssh_keys)
 
         self.proxmox.set_resources(
             vmid,
@@ -140,7 +141,13 @@ class ImageBuilder:
             "status": "ready",
         }
 
-    def _apply_cloudinit(self, vmid: int, user_data: str, *, sshkeys: str | None = None) -> None:
+    def _apply_cloudinit(
+        self,
+        vmid: int,
+        user_data: str,
+        *,
+        sshkeys: list[str] | str | None = None,
+    ) -> None:
         self.proxmox.set_cloudinit(
             vmid,
             user_data=user_data,

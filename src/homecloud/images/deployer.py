@@ -14,7 +14,7 @@ from homecloud.images.registry import get_image
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.state import (
     get_built_template,
-    get_ssh_public_key,
+    get_ssh_public_keys,
     hydrate_registry,
     register_vm,
     unregister_vm,
@@ -65,8 +65,8 @@ class VMDeployer:
                 "Base image not built yet — complete setup and build the base image first"
             )
 
-        ssh_key = get_ssh_public_key()
-        if not ssh_key:
+        ssh_keys = get_ssh_public_keys()
+        if not ssh_keys:
             raise ValueError("No SSH public key — complete setup first")
 
         vmid = self.proxmox.next_vmid()
@@ -82,14 +82,14 @@ class VMDeployer:
             "deploy.yaml.j2",
             hostname=name,
             tailscale_auth_key=settings.tailscale_auth_key,
-            ssh_public_key=ssh_key.strip(),
+            ssh_public_keys=ssh_keys,
         )
         self.proxmox.set_cloudinit(
             vmid,
             user_data=deploy_cloud_init,
             ciuser=settings.vm_ssh_user,
             ipconfig0="ip=dhcp",
-            sshkeys=ssh_key,
+            sshkeys=ssh_keys,
         )
 
         memory_mb = int(memory_gb * 1024)

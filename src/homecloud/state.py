@@ -5,12 +5,15 @@ from pathlib import Path
 
 STATE_FILE = Path(".homecloud/state.json")
 
+_VALID_KEY_PREFIXES = ("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")
+
 
 def load_state() -> dict:
     if not STATE_FILE.exists():
         return {
             "setup_complete": False,
             "ssh_public_key": None,
+            "ssh_public_keys": [],
             "built_templates": {},
             "custom_templates": {},
             "vms": {},
@@ -18,7 +21,11 @@ def load_state() -> dict:
     state = json.loads(STATE_FILE.read_text())
     state.setdefault("setup_complete", False)
     state.setdefault("ssh_public_key", None)
+    state.setdefault("ssh_public_keys", [])
     state.setdefault("vms", {})
+    # Backfill: if legacy single-key state exists but list is empty, migrate it.
+    if state["ssh_public_key"] and not state["ssh_public_keys"]:
+        state["ssh_public_keys"] = [state["ssh_public_key"]]
     return state
 
 
@@ -27,23 +34,73 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
+def _validate_key(raw: str) -> str:
+    """Normalize and validate a single SSH public key; raise ValueError if invalid."""
+    key = raw.strip().splitlines()[0]
+    if not key.startswith(_VALID_KEY_PREFIXES):
+        short = key[:60]
+        raise ValueError(f"Invalid SSH public key format: {short!r}")
+    return key
+
+
 def get_ssh_public_key() -> str | None:
-    return load_state().get("ssh_public_key")
-
-
-def save_setup(*, ssh_public_key: str) -> None:
-    key = ssh_public_key.strip()
-    if not key.startswith(("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")):
-        raise ValueError("Invalid SSH public key format")
+    """Return the first stored SSH public key (back-compat helper)."""
     state = load_state()
-    state["ssh_public_key"] = key.splitlines()[0]
+    keys = state.get("ssh_public_keys", [])
+    return keys[0] if keys else state.get("ssh_public_key")
+
+
+def get_ssh_public_keys() -> list[str]:
+    """Return all stored SSH public keys."""
+    return load_state().get("ssh_public_keys", [])
+
+
+def save_setup(
+    *,
+    ssh_public_key: str | None = None,
+    ssh_public_keys: list[str] | None = None,
+) -> None:
+    """Persist SSH public key(s) and mark setup complete.
+
+    Accepts a single key via *ssh_public_key* (legacy callers) or a list via
+    *ssh_public_keys*.  When both are supplied they are merged.  Each key is
+    validated for format, duplicates are removed (order preserved), and the
+    first key is also stored in the legacy ``ssh_public_key`` field for
+    backward compatibility.
+
+    Note: changing keys only affects *new* images/instances.  A base-image
+    rebuild is required to bake new keys into future VMs.
+    """
+    raw: list[str] = []
+    if ssh_public_keys:
+        raw.extend(ssh_public_keys)
+    if ssh_public_key and ssh_public_key not in raw:
+        raw.append(ssh_public_key)
+
+    if not raw:
+        raise ValueError("At least one SSH public key is required")
+
+    validated: list[str] = [_validate_key(k) for k in raw]
+
+    # Dedupe, preserving order.
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for k in validated:
+        if k not in seen:
+            seen.add(k)
+            deduped.append(k)
+
+    state = load_state()
+    state["ssh_public_keys"] = deduped
+    state["ssh_public_key"] = deduped[0]  # back-compat: first key
     state["setup_complete"] = True
     save_state(state)
 
 
 def is_setup_complete() -> bool:
     state = load_state()
-    return bool(state.get("setup_complete") and state.get("ssh_public_key"))
+    has_key = bool(state.get("ssh_public_keys") or state.get("ssh_public_key"))
+    return bool(state.get("setup_complete") and has_key)
 
 
 def set_built_template(image_id: str, template_id: int) -> None:

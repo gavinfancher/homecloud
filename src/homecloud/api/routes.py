@@ -22,6 +22,7 @@ from homecloud.sizes import list_sizes
 from homecloud.state import (
     get_built_template,
     get_instance,
+    get_ssh_public_keys,
     hydrate_registry,
     is_setup_complete,
     list_registered_vms,
@@ -84,6 +85,7 @@ def dashboard() -> dict:
 @router.get("/setup")
 def setup_status() -> dict:
     hydrate_registry()
+    keys = get_ssh_public_keys()
     return {
         "setup_complete": is_setup_complete(),
         "base_image_built": get_built_template("homecloud-base") is not None,
@@ -91,16 +93,31 @@ def setup_status() -> dict:
         "proxmox_node": settings.proxmox_node,
         "proxmox_storage": settings.proxmox_storage,
         "vm_ssh_user": settings.vm_ssh_user,
+        "ssh_public_keys_count": len(keys),
+        "ssh_public_keys": keys,
+        "rebuild_note": (
+            "Changing SSH keys only affects new images/instances. "
+            "A base-image rebuild is required to bake new keys into future VMs."
+        ),
     }
 
 
 @router.post("/setup")
 def complete_setup(body: SetupRequest) -> dict:
     try:
-        save_setup(ssh_public_key=body.ssh_public_key)
+        save_setup(ssh_public_keys=body.ssh_public_keys)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"setup_complete": True}
+    keys = get_ssh_public_keys()
+    return {
+        "setup_complete": True,
+        "ssh_public_keys_count": len(keys),
+        "rebuild_required": True,
+        "rebuild_note": (
+            "Changing SSH keys only affects new images/instances. "
+            "A base-image rebuild is required to bake new keys into future VMs."
+        ),
+    }
 
 
 @router.get("/sizes")

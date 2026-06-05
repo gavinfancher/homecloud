@@ -8,7 +8,45 @@ _SERVICE_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 
 
 class SetupRequest(BaseModel):
-    ssh_public_key: str = Field(..., min_length=20)
+    """Accept one SSH public key (legacy) or many (new multi-key path).
+
+    Exactly one of ``ssh_public_key`` or ``ssh_public_keys`` must be supplied.
+    Both can be supplied; duplicates are removed, preserving order.  After
+    validation, ``ssh_public_keys`` is always a non-empty list and
+    ``ssh_public_key`` is always set to the first key (back-compat).
+    """
+
+    ssh_public_key: str | None = Field(None, min_length=20)
+    ssh_public_keys: list[str] | None = None
+
+    @model_validator(mode="after")
+    def normalize_keys(self) -> SetupRequest:
+        has_single = self.ssh_public_key is not None
+        has_list = bool(self.ssh_public_keys)
+
+        if not has_single and not has_list:
+            raise ValueError(
+                "Provide ssh_public_key (single key) or ssh_public_keys (list); "
+                "at least one key is required."
+            )
+
+        raw: list[str] = []
+        if has_list:
+            raw.extend(self.ssh_public_keys)  # type: ignore[arg-type]
+        if has_single and self.ssh_public_key not in raw:
+            raw.append(self.ssh_public_key)  # type: ignore[arg-type]
+
+        # Dedupe preserving order.
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for k in raw:
+            if k not in seen:
+                seen.add(k)
+                deduped.append(k)
+
+        self.ssh_public_keys = deduped
+        self.ssh_public_key = deduped[0]
+        return self
 
 
 _VALID_SIZE_IDS = ("micro", "small", "medium", "large", "xlarge")

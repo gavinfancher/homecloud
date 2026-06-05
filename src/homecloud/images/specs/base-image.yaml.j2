@@ -1,6 +1,13 @@
 #cloud-config
 hostname: {{ hostname }}
 
+{% if ssh_public_keys %}
+ssh_authorized_keys:
+{% for key in ssh_public_keys %}
+  - {{ key }}
+{% endfor %}
+
+{% endif %}
 package_update: true
 package_upgrade: true
 

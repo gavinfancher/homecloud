@@ -155,7 +155,7 @@ class ProxmoxClient:
         *,
         user_data: str | None = None,
         ipconfig0: str | None = "ip=dhcp",
-        sshkeys: str | None = None,
+        sshkeys: list[str] | str | None = None,
         ciuser: str | None = None,
         snippet_storage: str = "local",
     ) -> None:
@@ -167,8 +167,12 @@ class ProxmoxClient:
         if ipconfig0 is not None:
             params["ipconfig0"] = ipconfig0
         if sshkeys is not None:
-            key = sshkeys.strip().splitlines()[0]
-            params["sshkeys"] = quote(key, safe="")
+            # Proxmox accepts newline-separated keys, all URL-encoded together.
+            if isinstance(sshkeys, list):
+                key_str = "\n".join(k.strip().splitlines()[0] for k in sshkeys if k.strip())
+            else:
+                key_str = sshkeys.strip().splitlines()[0]
+            params["sshkeys"] = quote(key_str, safe="")
         if ciuser is not None:
             params["ciuser"] = ciuser
         if params:
