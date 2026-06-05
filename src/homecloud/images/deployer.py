@@ -42,6 +42,7 @@ class VMDeployer:
         cores: int,
         memory_gb: float,
         disk_gb: int,
+        size_id: str = "custom",
         image_id: str = "homecloud-base",
         log: LogFn | None = None,
     ) -> dict:
@@ -117,6 +118,7 @@ class VMDeployer:
             "ip": tailscale_ip,
             "tailscale_ip": tailscale_ip,
             "hostname": dns["hostname"],
+            "size_id": size_id,
             "cores": cores,
             "memory_gb": memory_gb,
             "memory_mb": memory_mb,
@@ -130,6 +132,7 @@ class VMDeployer:
             "vmid": vmid,
             "name": name,
             "status": "running",
+            "size_id": size_id,
             "cores": cores,
             "memory_gb": memory_gb,
             "memory_mb": memory_mb,

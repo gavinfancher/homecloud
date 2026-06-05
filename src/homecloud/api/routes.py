@@ -16,6 +16,7 @@ from homecloud.images.deployer import VMDeployer, VMManager
 from homecloud.images.registry import list_images
 from homecloud.jobs import job_store
 from homecloud.proxmox.client import ProxmoxClient
+from homecloud.sizes import list_sizes
 from homecloud.state import (
     get_built_template,
     hydrate_registry,
@@ -96,6 +97,20 @@ def complete_setup(body: SetupRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"setup_complete": True}
+
+
+@router.get("/sizes")
+def sizes_list() -> list[dict]:
+    return [
+        {
+            "id": s.id,
+            "label": s.label,
+            "cores": s.cores,
+            "memory_gb": s.memory_gb,
+            "disk_gb": s.disk_gb,
+        }
+        for s in list_sizes()
+    ]
 
 
 @router.get("/images")
@@ -180,6 +195,7 @@ def deploy_vm(body: DeployVMRequest) -> dict:
         label=body.name,
         meta={
             "name": body.name,
+            "size_id": body.size_id,
             "cores": body.cores,
             "memory_gb": body.memory_gb,
             "disk_gb": body.disk_gb,
@@ -193,9 +209,10 @@ def deploy_vm(body: DeployVMRequest) -> dict:
         try:
             result = deployer.deploy(
                 name=body.name,
-                cores=body.cores,
-                memory_gb=body.memory_gb,
-                disk_gb=body.disk_gb,
+                size_id=body.size_id or "custom",
+                cores=body.cores,  # type: ignore[arg-type]
+                memory_gb=body.memory_gb,  # type: ignore[arg-type]
+                disk_gb=body.disk_gb,  # type: ignore[arg-type]
                 image_id=body.image_id,
                 log=job_store.logger(job["id"]),
             )
