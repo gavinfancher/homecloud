@@ -89,3 +89,65 @@ def hydrate_registry() -> None:
     for image_id, template_id in state.get("built_templates", {}).items():
         if image_id in BUILTIN_IMAGES:
             BUILTIN_IMAGES[image_id].template_id = template_id
+
+
+# ---------------------------------------------------------------------------
+# Instance helpers (Phase 04 additions — additive, non-breaking)
+# ---------------------------------------------------------------------------
+
+
+def get_instance(name: str) -> dict | None:
+    """Return the state record for instance *name*, or None if not registered."""
+    return load_state().get("vms", {}).get(name)
+
+
+def set_instance_web_service(
+    instance_name: str,
+    *,
+    service: str,
+    port: int,
+    public_host: str,
+    public: bool,
+    cloudflare_record_id: str,
+    caddy_config: str,
+) -> None:
+    """Upsert a web service entry in the instance's ``web`` list.
+
+    Finds any existing entry with the same ``service`` name and replaces it;
+    appends a new entry otherwise.  Does not modify other keys of the instance
+    record.
+    """
+    state = load_state()
+    vm = state.setdefault("vms", {}).setdefault(instance_name, {})
+    web_list: list[dict] = vm.setdefault("web", [])
+
+    entry = {
+        "service": service,
+        "port": port,
+        "public_host": public_host,
+        "public": public,
+        "cloudflare_record_id": cloudflare_record_id,
+        "caddy_config": caddy_config,
+    }
+
+    for i, item in enumerate(web_list):
+        if item.get("service") == service:
+            web_list[i] = entry
+            break
+    else:
+        web_list.append(entry)
+
+    save_state(state)
+
+
+def remove_instance_web_service(instance_name: str, service: str) -> None:
+    """Remove the web service entry for *service* from *instance_name*.
+
+    No-op when the instance or service is not found.
+    """
+    state = load_state()
+    vm = state.get("vms", {}).get(instance_name)
+    if vm is None:
+        return
+    vm["web"] = [e for e in vm.get("web", []) if e.get("service") != service]
+    save_state(state)

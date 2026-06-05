@@ -1,0 +1,17 @@
+{
+    # Expose the admin API on all interfaces so the controller container
+    # (a sibling in the compose network) can POST to /reload after writing
+    # new site files.  Only the compose-internal network reaches this port;
+    # it is NOT published to the host.
+    admin 0.0.0.0:2019
+
+    # Disable global auto-HTTPS.  TLS is terminated at the Cloudflare edge;
+    # individual site files use the http:// scheme so Caddy never attempts to
+    # obtain certificates for these hosts.
+    auto_https off
+}
+
+# Per-host site files are written by the controller into the shared
+# caddy_sites volume and imported here.  After writing a file, the controller
+# POSTs to http://caddy:2019/reload so Caddy picks up the change immediately.
+import /etc/caddy/sites/*.caddy
