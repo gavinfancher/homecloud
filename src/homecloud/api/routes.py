@@ -8,22 +8,26 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from homecloud.access import ssh_config_block
-from homecloud.api.schemas import DeployVMRequest, SetupRequest
+from homecloud.api.schemas import DeployVMRequest, PublishServiceRequest, SetupRequest
 from homecloud.config import settings
 from homecloud.dns.names import connection_info, vm_fqdn
 from homecloud.images.builder import ImageBuilder
 from homecloud.images.deployer import VMDeployer, VMManager
 from homecloud.images.registry import list_images
 from homecloud.jobs import job_store
+from homecloud.ports import scan_ports
 from homecloud.proxmox.client import ProxmoxClient
+from homecloud.publish import publish_web, unpublish_web
 from homecloud.sizes import list_sizes
 from homecloud.state import (
     get_built_template,
+    get_instance,
     hydrate_registry,
     is_setup_complete,
     list_registered_vms,
     save_setup,
     set_built_template,
+    set_instance_ports,
 )
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -266,6 +270,117 @@ def ssh_config_export() -> dict:
     for name, vm in list_registered_vms().items():
         lines.append(ssh_config_block(host_alias=name, hostname=vm.get("hostname", name)))
     return {"config": "".join(lines)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 05 — Port discovery + service routing
+# ---------------------------------------------------------------------------
+
+
+def _require_instance(name: str) -> dict:
+    """Return the registered state record for *name* or raise HTTP 404."""
+    instance = get_instance(name)
+    if instance is None:
+        raise HTTPException(404, f"Instance '{name}' not found in state")
+    return instance
+
+
+@router.post("/vms/{name}/scan-ports")
+def scan_ports_route(name: str) -> dict:
+    """Create a background job that scans listening TCP ports on *name*.
+
+    The job persists results to ``state.vms[name].ports_seen`` on completion.
+    Returns ``{job_id}`` immediately.
+    """
+    instance = _require_instance(name)
+    job = job_store.create(
+        "scan_ports",
+        label=name,
+        meta={"instance": name, "tailscale_ip": instance.get("tailscale_ip", "")},
+    )
+
+    def run() -> None:
+        job_store.start(job["id"])
+        log = job_store.logger(job["id"])
+        try:
+            log("info", f"Starting port scan for {name} ({instance.get('tailscale_ip', 'no-ip')})")
+            # Re-read instance in case state changed between request and thread start.
+            current = get_instance(name) or instance
+            ports = scan_ports(current)
+            set_instance_ports(name, ports)
+            log("info", f"Found {len(ports)} listening port(s)")
+            job_store.complete(job["id"], {"ports": ports, "count": len(ports)})
+        except Exception as exc:
+            job_store.fail(job["id"], str(exc))
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job_id": job["id"]}
+
+
+@router.get("/vms/{name}/ports")
+def get_ports(name: str) -> dict:
+    """Return last port-scan results for *name* from state.
+
+    Run ``POST /api/vms/{name}/scan-ports`` first to populate this.
+    """
+    instance = _require_instance(name)
+    return {
+        "ports_seen": instance.get("ports_seen", []),
+        "ports_scanned_at": instance.get("ports_scanned_at"),
+    }
+
+
+@router.post("/vms/{name}/services")
+def publish_service(name: str, body: PublishServiceRequest) -> dict:
+    """Publish *body.port* on instance *name* as a named web service.
+
+    Calls ``publish_web`` (Caddy site file + optional Cloudflare CNAME) and
+    persists the entry under ``state.vms[name].web``.
+
+    The ``service`` field must match ``^[a-z][a-z0-9-]{1,30}$`` (validated by
+    the schema).  The ``port`` must appear in ``ports_seen`` unless
+    ``force=true`` is set.
+    """
+    instance = _require_instance(name)
+
+    # Port must have been seen in a recent scan (unless overridden).
+    if not body.force:
+        seen_ports = {p["port"] for p in instance.get("ports_seen", [])}
+        if body.port not in seen_ports:
+            raise HTTPException(
+                400,
+                f"Port {body.port} was not found in the last scan of '{name}'. "
+                "Run POST /api/vms/{name}/scan-ports first, or set force=true to bypass.",
+            )
+
+    upstream_host: str = instance.get("tailscale_ip", "")
+    if not upstream_host:
+        raise HTTPException(
+            400,
+            f"Instance '{name}' has no tailscale_ip recorded in state; "
+            "ensure the VM has joined the tailnet before publishing.",
+        )
+
+    result = publish_web(
+        name,
+        body.service,
+        body.port,
+        upstream_host=upstream_host,
+        public=body.public,
+    )
+    return result
+
+
+@router.delete("/vms/{name}/services/{service}")
+def unpublish_service(name: str, service: str) -> dict:
+    """Unpublish *service* from instance *name*.
+
+    Removes the Caddy route, Cloudflare record (if present), and state entry.
+    No-op when the service was not published.
+    """
+    _require_instance(name)
+    unpublish_web(name, service)
+    return {"ok": True, "removed": service}
 
 
 def ui_index() -> FileResponse:

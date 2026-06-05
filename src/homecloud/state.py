@@ -151,3 +151,24 @@ def remove_instance_web_service(instance_name: str, service: str) -> None:
         return
     vm["web"] = [e for e in vm.get("web", []) if e.get("service") != service]
     save_state(state)
+
+
+# ---------------------------------------------------------------------------
+# Port-scan helpers (Phase 05 additions — additive, non-breaking)
+# ---------------------------------------------------------------------------
+
+
+def set_instance_ports(instance_name: str, ports: list[dict]) -> None:
+    """Persist port-scan results for *instance_name*.
+
+    Stores the list under ``ports_seen`` and records the current UTC timestamp
+    in ``ports_scanned_at``.  Creates the instance entry if it does not yet
+    exist in state (edge case: scan called before full registration).
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    state = load_state()
+    vm = state.setdefault("vms", {}).setdefault(instance_name, {})
+    vm["ports_seen"] = list(ports)
+    vm["ports_scanned_at"] = datetime.now(UTC).isoformat()
+    save_state(state)

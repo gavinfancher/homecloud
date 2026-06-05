@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+import re
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+_SERVICE_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 
 
 class SetupRequest(BaseModel):
@@ -65,3 +69,25 @@ class DeployVMRequest(BaseModel):
                 self.size_id = "custom"
 
         return self
+
+
+class PublishServiceRequest(BaseModel):
+    """Body for ``POST /api/vms/{name}/services``."""
+
+    service: str = Field(..., description="Service label, e.g. 'grafana'")
+    port: int = Field(..., ge=1, le=65535)
+    public: bool = True
+    force: bool = Field(
+        False,
+        description="Bypass the 'port was seen in last scan' check.",
+    )
+
+    @field_validator("service")
+    @classmethod
+    def validate_service_name(cls, v: str) -> str:
+        if not _SERVICE_RE.match(v):
+            raise ValueError(
+                "service must match ^[a-z][a-z0-9-]{1,30}$ "
+                "(lowercase letters, digits, hyphens; start with a letter)"
+            )
+        return v
