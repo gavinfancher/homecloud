@@ -17,9 +17,10 @@ console/node_modules/
 console/.next/
 console/dist/
 
-# Web SPA (Vite build artifacts; source is committed)
-web/node_modules/
-web/dist/
+# Frontend SPA (Vite build artifacts; source is committed)
+frontend/node_modules/
+frontend/dist/
+frontend/.wrangler/
 
 # Agent tooling artifacts (not project code)
 .agents/

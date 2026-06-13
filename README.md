@@ -63,6 +63,6 @@ No Pi-hole or local network required. Ensure **MagicDNS** is enabled in your [Ta
 The `/api/*` endpoints and every published instance app are gated by **Clerk**.
 Set `CLERK_JWKS_URL` + `CLERK_ISSUER` (and `CLERK_AUTHORIZED_PARTIES`) to enforce;
 when unset, auth is disabled for local/dev (logged loudly). The control-plane UI
-is a separate React + Vite SPA in `web/` (Cloudflare Pages) — see `.env.example`.
+is a separate React + Vite SPA in `frontend/` (Cloudflare Pages) — see `.env.example`.
 
 Legacy config: [`legacy/initial`](../../tree/legacy/initial) branch.

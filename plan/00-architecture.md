@@ -75,7 +75,7 @@ get the public tunnel (web only). This is exactly the desired behavior.
 
 > **Auth — SUPERSEDED (phases 09–11): Clerk, not Cloudflare Access.** The owner chose a single
 > auth system. The control-plane UI is now a **React + Vite SPA on Cloudflare Pages** behind
-> **Clerk** (`web/`), and the FastAPI API verifies Clerk JWTs on every `/api/*` call
+> **Clerk** (`frontend/`), and the FastAPI API verifies Clerk JWTs on every `/api/*` call
 > (`src/homecloud/auth.py`). Published instance apps are gated by the **same** Clerk session via
 > a **Caddy `forward_auth`** to the controller's `/auth/verify` (set
 > `CADDY_FORWARD_AUTH_UPSTREAM`); a shared `.myhomecloud.dev` session cookie gives SSO across the
