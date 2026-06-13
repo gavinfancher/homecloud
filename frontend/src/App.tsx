@@ -44,6 +44,29 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <ClerkGate />
+    </ToastProvider>
+  )
+}
+
+/** Clerk `Show` renders nothing while `isLoaded` is false — gate the whole app. */
+function ClerkGate() {
+  const { isLoaded } = useAuth()
+
+  if (!isLoaded) {
+    return (
+      <div className="signin-wrap">
+        <div className="signin-brand">
+          <IconCloud width={40} height={40} />
+          <h1>homecloud</h1>
+        </div>
+        <p className="muted">Loading…</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
       <Show when="signed-out">
         <div className="signin-wrap">
           <div className="signin-brand">
@@ -59,7 +82,7 @@ export default function App() {
           <Console />
         </ClerkStoreProvider>
       </Show>
-    </ToastProvider>
+    </>
   )
 }
 
@@ -74,11 +97,7 @@ function ClerkStoreProvider({ children }: { children: ReactNode }) {
   }, [getToken, isSignedIn])
 
   if (!isLoaded) {
-    return (
-      <div className="signin-wrap">
-        <p className="muted">Loading session…</p>
-      </div>
-    )
+    return null
   }
 
   return <StoreProvider getToken={tokenGetter}>{children}</StoreProvider>

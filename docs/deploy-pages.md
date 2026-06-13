@@ -40,6 +40,15 @@ Set these for **Production** (and Preview if you want Clerk on preview deploys):
 
 Pages → **Custom domains** → add `app.myhomecloud.dev` (likely already attached if the site is live).
 
+### Clerk satellite domain (required for `app.myhomecloud.dev`)
+
+The SPA runs on `app.myhomecloud.dev`, not Clerk's Accounts host. In [Clerk Dashboard](https://dashboard.clerk.com) → **Configure** → **Domains**:
+
+1. Add **Satellite domain**: `app.myhomecloud.dev`
+2. Ensure **Allowed redirect URLs** include `https://app.myhomecloud.dev/*`
+
+Production builds use satellite mode via `frontend/.env.production` (`VITE_CLERK_IS_SATELLITE`, sign-in URL on `topical-lemur-74.accounts.dev`).
+
 ## Backend alignment (control node `.env`)
 
 When Clerk is enabled on the controller, set:
