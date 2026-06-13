@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
-from homecloud.api.routes import auth_router, public_router, router, ui_index
+from homecloud.api.routes import auth_router, public_router, router
 from homecloud.auth import require_auth
 from homecloud.config import settings
 from homecloud.state import hydrate_registry
@@ -38,14 +36,14 @@ app.include_router(auth_router)
 # Everything under /api requires a valid Clerk token (no-op in dev — see auth.py).
 app.include_router(router, dependencies=[Depends(require_auth)])
 
-static_dir = Path(__file__).resolve().parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
 @app.get("/")
-def index():
-    return ui_index()
+def index() -> dict:
+    """The controller is API-only; the console is the Cloudflare Pages SPA."""
+    return {
+        "service": "homecloud-controller",
+        "console": settings.console_url or None,
+        "docs": "/docs",
+    }
 
 
 @app.on_event("startup")

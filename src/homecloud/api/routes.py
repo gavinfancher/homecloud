@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from homecloud.access import ssh_config_block
 from homecloud.api.schemas import DeployVMRequest, PublishServiceRequest, SetupRequest
@@ -37,7 +36,6 @@ router = APIRouter(prefix="/api", tags=["api"])
 public_router = APIRouter(prefix="/api", tags=["public"])
 # Caddy forward-auth gate for published instance apps (no prefix).
 auth_router = APIRouter(tags=["auth"])
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 def _merge_registered(vms: list[dict]) -> list[dict]:
@@ -482,7 +480,3 @@ def unpublish_service(name: str, service: str) -> dict:
     _require_instance(name)
     unpublish_web(name, service)
     return {"ok": True, "removed": service}
-
-
-def ui_index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
