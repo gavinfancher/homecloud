@@ -5,6 +5,18 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 export type TokenGetter = () => Promise<string | null>
 
+export interface WebService {
+  service: string
+  port: number
+  public_host: string
+  public: boolean
+}
+
+export interface SeenPort {
+  port: number
+  proc?: string
+}
+
 export interface VM {
   vmid: number
   name: string
@@ -13,16 +25,16 @@ export interface VM {
   memory_gb?: number
   disk_gb?: number
   hostname?: string
+  private_host?: string
+  magic_dns?: string
   tailscale_ip?: string
+  ip?: string
   ssh?: string
+  size_id?: string
+  image_id?: string
   web?: WebService[]
-}
-
-export interface WebService {
-  service: string
-  port: number
-  public_host: string
-  public: boolean
+  ports_seen?: SeenPort[]
+  ports_scanned_at?: string | null
 }
 
 export interface Size {
@@ -31,6 +43,18 @@ export interface Size {
   cores: number
   memory_gb: number
   disk_gb: number
+}
+
+export interface Image {
+  id: string
+  name: string
+  description: string
+  built: boolean
+  template_id: number | null
+  default_cores: number
+  default_memory_mb: number
+  default_disk_gb: number
+  packages: string[]
 }
 
 export interface JobLog {
@@ -48,6 +72,9 @@ export interface Job {
   result: unknown
   error: string | null
   cancel_requested?: boolean
+  created_at?: string
+  started_at?: string
+  finished_at?: string
 }
 
 export interface Dashboard {
@@ -55,8 +82,26 @@ export interface Dashboard {
   base_image_built: boolean
   tailscale_tailnet: string
   proxmox_node: string
+  proxmox_storage?: string
   stats: { total_vms: number; running: number; stopped: number; templates: number }
   recent_jobs: Job[]
+}
+
+export interface SetupStatus {
+  setup_complete: boolean
+  base_image_built: boolean
+  tailscale_tailnet: string
+  proxmox_node: string
+  proxmox_storage: string
+  vm_ssh_user: string
+  ssh_public_keys_count: number
+  ssh_public_keys: string[]
+  rebuild_note: string
+}
+
+export interface PortsResult {
+  ports_seen: SeenPort[]
+  ports_scanned_at: string | null
 }
 
 export interface DeployBody {
@@ -84,7 +129,7 @@ export function createApi(getToken: TokenGetter) {
     try {
       token = await getToken()
     } catch {
-      token = null
+      /* token unavailable — fall through; API enforces auth itself */
     }
     const headers: Record<string, string> = { ...(init.headers as Record<string, string>) }
     if (token) headers['Authorization'] = `Bearer ${token}`
@@ -108,9 +153,13 @@ export function createApi(getToken: TokenGetter) {
   return {
     dashboard: () => req<Dashboard>('/api/dashboard'),
     listVms: () => req<VM[]>('/api/vms'),
+    getVm: (vmid: number) => req<VM>(`/api/vms/${vmid}`),
     sizes: () => req<Size[]>('/api/sizes'),
+    images: () => req<Image[]>('/api/images'),
+    buildBaseImage: () => req<{ job_id: string }>('/api/images/homecloud-base/build', { method: 'POST' }),
     deploy: (body: DeployBody) =>
       req<{ job_id: string }>('/api/vms', { method: 'POST', body: JSON.stringify(body) }),
+    listJobs: (limit = 30) => req<Job[]>(`/api/jobs?limit=${limit}`),
     job: (id: string) => req<Job>(`/api/jobs/${id}`),
     cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: 'POST' }),
     start: (vmid: number) => req(`/api/vms/${vmid}/start`, { method: 'POST' }),
@@ -123,10 +172,18 @@ export function createApi(getToken: TokenGetter) {
       }),
     scanPorts: (name: string) =>
       req<{ job_id: string }>(`/api/vms/${name}/scan-ports`, { method: 'POST' }),
-    publish: (name: string, service: string, port: number, isPublic: boolean) =>
+    ports: (name: string) => req<PortsResult>(`/api/vms/${name}/ports`),
+    setupStatus: () => req<SetupStatus>('/api/setup'),
+    saveSetup: (sshPublicKeys: string[]) =>
+      req<{ setup_complete: boolean; ssh_public_keys_count: number; rebuild_note: string }>(
+        '/api/setup',
+        { method: 'POST', body: JSON.stringify({ ssh_public_keys: sshPublicKeys }) },
+      ),
+    sshConfig: () => req<{ config: string }>('/api/ssh-config'),
+    publish: (name: string, service: string, port: number, isPublic: boolean, force = false) =>
       req(`/api/vms/${name}/services`, {
         method: 'POST',
-        body: JSON.stringify({ service, port, public: isPublic }),
+        body: JSON.stringify({ service, port, public: isPublic, force }),
       }),
     unpublish: (name: string, service: string) =>
       req(`/api/vms/${name}/services/${service}`, { method: 'DELETE' }),

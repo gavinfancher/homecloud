@@ -46,12 +46,12 @@ def _merge_registered(vms: list[dict]) -> list[dict]:
             vm.update(registered[name])
         # Always expose current MagicDNS hostname (migrates away from legacy .home records)
         if name:
-            fqdn = vm_fqdn(name)
-            vm["hostname"] = fqdn
-            vm["magic_dns"] = fqdn
             if vm.get("tailscale_ip") or vm.get("ip"):
                 ip = vm.get("tailscale_ip") or vm.get("ip")
                 vm.update(connection_info(name, ip))
+            else:
+                vm["hostname"] = vm_fqdn(name)
+                vm["magic_dns"] = vm_fqdn(name)
         if vm.get("memory_gb") is None and vm.get("memory_mb"):
             vm["memory_gb"] = round(vm["memory_mb"] / 1024, 2)
     return vms

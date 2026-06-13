@@ -2,12 +2,16 @@
   "name": "homecloud-frontend",
   "private": true,
   "version": "0.0.0",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pages:deploy": "npm run build && wrangler pages deploy dist --project-name=homecloud"
   },
   "dependencies": {
     "@clerk/react": "^6.9.1",

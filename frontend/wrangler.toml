@@ -1,0 +1,7 @@
+# Cloudflare Pages (Git-connected auto-deploy on push to main).
+# Dashboard build settings must match:
+#   Root: frontend | Build: npm run build | Output: dist | Node: 22
+# See docs/deploy-pages.md for env vars and custom domain.
+name = "homecloud"
+compatibility_date = "2026-06-13"
+pages_build_output_dir = "dist"

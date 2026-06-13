@@ -6,7 +6,7 @@ import pytest
 
 from homecloud.access import ssh_config_block
 from homecloud.config import settings
-from homecloud.dns.names import vm_fqdn
+from homecloud.dns.names import connection_info, private_fqdn, vm_fqdn
 from homecloud.proxmox.client import ProxmoxClient
 
 
@@ -30,4 +30,4 @@ def test_list_templates_includes_ubuntu_base():
 def test_ssh_config_block():
     block = ssh_config_block(host_alias="dagster", hostname="dagster")
     assert "Host dagster" in block
-    assert vm_fqdn("dagster") in block
+    assert private_fqdn("dagster") in block

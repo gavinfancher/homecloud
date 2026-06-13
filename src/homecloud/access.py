@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from homecloud.config import settings
-from homecloud.dns.names import vm_fqdn
+from homecloud.dns.names import private_fqdn
 
 
 def ssh_config_block(
@@ -12,7 +12,7 @@ def ssh_config_block(
     identity_file: str | None = None,
 ) -> str:
     user = user or settings.vm_ssh_user
-    fqdn = vm_fqdn(hostname)
+    fqdn = private_fqdn(hostname)
     lines = [f"Host {host_alias}", f"    HostName {fqdn}", f"    User {user}"]
     if identity_file:
         lines.append(f"    IdentityFile {identity_file}")
