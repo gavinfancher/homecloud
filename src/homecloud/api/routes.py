@@ -351,16 +351,28 @@ def resume_vm(vmid: int) -> dict:
 
 @router.delete("/vms/{vmid}")
 def delete_vm(vmid: int, name: str | None = None) -> dict:
-    manager = VMManager()
     if not name:
         for vm in ProxmoxClient().list_vms():
             if vm.get("vmid") == vmid:
                 name = vm.get("name")
                 break
-    try:
-        return manager.delete(vmid, name=name)
-    except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+    label = name or f"vm-{vmid}"
+    job = job_store.create("delete_vm", label=label, meta={"vmid": vmid, "name": name})
+
+    def run() -> None:
+        job_store.start(job["id"])
+        manager = VMManager()
+        log = job_store.logger(job["id"])
+        try:
+            log("info", f"Deleting {label}…")
+            result = manager.delete(vmid, name=name)
+            job_store.complete(job["id"], result)
+            log("info", f"Deleted {label}")
+        except Exception as exc:
+            job_store.fail(job["id"], str(exc))
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job_id": job["id"]}
 
 
 @router.get("/ssh-config")

@@ -141,6 +141,7 @@ class VMDeployer:
             write_zone()
         except Exception:
             logger.warning("write_zone failed after VM create — non-fatal", exc_info=True)
+        ProxmoxClient.invalidate_vm_list_cache()
         emit("info", f"Deployment complete — SSH: {dns['ssh']}")
 
         return {
@@ -205,21 +206,25 @@ class VMManager:
     def start(self, vmid: int) -> dict:
         task = self.proxmox.start(vmid)
         self.proxmox.wait_for_task(task, timeout=120)
+        ProxmoxClient.invalidate_vm_list_cache()
         return {"vmid": vmid, "status": "running"}
 
     def stop(self, vmid: int) -> dict:
         task = self.proxmox.stop(vmid)
         self.proxmox.wait_for_task(task, timeout=120)
+        ProxmoxClient.invalidate_vm_list_cache()
         return {"vmid": vmid, "status": "stopped"}
 
     def suspend(self, vmid: int) -> dict:
         task = self.proxmox.suspend(vmid)
         self.proxmox.wait_for_task(task, timeout=120)
+        ProxmoxClient.invalidate_vm_list_cache()
         return {"vmid": vmid, "status": "paused"}
 
     def resume(self, vmid: int) -> dict:
         task = self.proxmox.resume(vmid)
         self.proxmox.wait_for_task(task, timeout=120)
+        ProxmoxClient.invalidate_vm_list_cache()
         return {"vmid": vmid, "status": "running"}
 
     def delete(self, vmid: int, *, name: str | None = None) -> dict:
@@ -237,4 +242,5 @@ class VMManager:
         task = self.proxmox.delete_vm(vmid)
         if task:
             self.proxmox.wait_for_task(task, timeout=120)
+        ProxmoxClient.invalidate_vm_list_cache()
         return {"vmid": vmid, "status": "deleted"}

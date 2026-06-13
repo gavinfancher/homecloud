@@ -140,7 +140,7 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
           <div className="conn-banner" role="status">
             <span className="dot dot-danger" />
             <span>
-              Can’t reach the controller API — live data is paused.{' '}
+              Can’t reach the controller API — live data may be stale.{' '}
               <span className="muted">({connError})</span>
             </span>
           </div>

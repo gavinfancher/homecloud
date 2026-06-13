@@ -3,10 +3,11 @@
 # to public DNS (Cloudflare) so the SPA and API keep working on the tailnet.
 myhomecloud.dev {
     file /etc/coredns/db.myhomecloud.dev myhomecloud.dev {
+        reload 5s
         fallthrough
     }
     forward . 1.1.1.1 9.9.9.9
-    cache 30
+    cache 10
     log
     errors
 }

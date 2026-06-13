@@ -113,6 +113,9 @@ export interface DeployBody {
   image_id?: string
 }
 
+export const REQUEST_TIMEOUT_MS = 45_000
+export const CONN_FAIL_THRESHOLD = 3
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -136,7 +139,14 @@ export function createApi(getToken: TokenGetter) {
     if (init.body) headers['Content-Type'] = 'application/json'
 
     try {
-      const resp = await fetch(`${API_BASE}${path}`, { ...init, headers })
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+      const resp = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
       if (!resp.ok) {
         let detail = resp.statusText
         try {
@@ -151,9 +161,14 @@ export function createApi(getToken: TokenGetter) {
       return resp.json() as Promise<T>
     } catch (e) {
       if (e instanceof ApiError) throw e
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        throw new Error(
+          `Timed out calling ${API_BASE || 'same-origin'}${path} — the controller may be busy (Proxmox deploy/delete)`,
+        )
+      }
       if (e instanceof TypeError) {
         throw new Error(
-          `Network error calling ${API_BASE || 'same-origin'}${path} — check DNS (split DNS) and CORS`,
+          `Network error calling ${API_BASE || 'same-origin'}${path} — API unreachable (check api.myhomecloud.dev / tunnel)`,
           { cause: e },
         )
       }
@@ -178,7 +193,7 @@ export function createApi(getToken: TokenGetter) {
     suspend: (vmid: number) => req(`/api/vms/${vmid}/suspend`, { method: 'POST' }),
     resume: (vmid: number) => req(`/api/vms/${vmid}/resume`, { method: 'POST' }),
     remove: (vmid: number, name?: string) =>
-      req(`/api/vms/${vmid}${name ? `?name=${encodeURIComponent(name)}` : ''}`, {
+      req<{ job_id: string }>(`/api/vms/${vmid}${name ? `?name=${encodeURIComponent(name)}` : ''}`, {
         method: 'DELETE',
       }),
     scanPorts: (name: string) =>

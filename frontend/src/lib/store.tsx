@@ -4,11 +4,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import {
   createApi,
+  CONN_FAIL_THRESHOLD,
   type Api,
   type Dashboard,
   type Image,
@@ -57,20 +59,39 @@ export function StoreProvider({
   const [ready, setReady] = useState(false)
   const [connError, setConnError] = useState<string | null>(null)
   const [activeJob, setActiveJob] = useState<string | null>(null)
+  const failCountRef = useRef(0)
 
   const refresh = useCallback(async () => {
+    let gotDashboard = false
+    let gotVms = false
+    let lastError: string | null = null
+
     try {
-      const [d, v] = await Promise.all([api.dashboard(), api.listVms()])
+      const d = await api.dashboard()
       setDashboard(d)
-      setVms(v)
-      setConnError(null)
+      gotDashboard = true
     } catch (e) {
-      // Polling failures (e.g. the controller can't reach Proxmox) surface as a
-      // single persistent banner instead of a toast on every interval tick.
-      setConnError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setReady(true)
+      lastError = e instanceof Error ? e.message : String(e)
     }
+
+    try {
+      const v = await api.listVms()
+      setVms(v)
+      gotVms = true
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e)
+    }
+
+    if (gotDashboard || gotVms) {
+      failCountRef.current = 0
+      setConnError(null)
+    } else if (lastError) {
+      failCountRef.current += 1
+      if (failCountRef.current >= CONN_FAIL_THRESHOLD) {
+        setConnError(lastError)
+      }
+    }
+    setReady(true)
   }, [api])
 
   const refreshImages = useCallback(async () => {
@@ -83,13 +104,11 @@ export function StoreProvider({
 
   useEffect(() => {
     api.sizes().then(setSizes).catch(() => {})
-    // Run initial loads off the effect body so state updates land in a
-    // microtask callback (avoids synchronous cascading renders on mount).
     Promise.resolve().then(refreshImages)
     Promise.resolve().then(refresh)
-    const t = setInterval(refresh, 5000)
+    const t = setInterval(refresh, activeJob ? 8000 : 5000)
     return () => clearInterval(t)
-  }, [api, refresh, refreshImages])
+  }, [api, refresh, refreshImages, activeJob])
 
   const value = useMemo<Store>(
     () => ({

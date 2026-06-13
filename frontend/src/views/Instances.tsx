@@ -180,7 +180,10 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
             disabled={busy}
             onClick={() => {
               if (confirm(`Delete ${vm.name}? This permanently destroys the VM.`))
-                act(() => api.remove(vm.vmid, vm.name), `Deleted ${vm.name}`)
+                act(async () => {
+                  const { job_id } = await api.remove(vm.vmid, vm.name)
+                  openJob(job_id)
+                })
             }}
           >
             <IconTrash />

@@ -140,6 +140,33 @@ Open `https://app.myhomecloud.dev` — Clerk sign-in, API calls to `api.myhomecl
 
 ## Troubleshooting
 
+### New instance hostname doesn't resolve
+
+You should **not** need to restart Tailscale after each VM. If a name fails right after
+create, it's usually one of these:
+
+1. **Deploy still running** — DNS is written only after the VM gets a Tailscale IP (last
+   step of the job). Wait for the job to finish.
+2. **CoreDNS zone reload** — the zone file updates immediately; CoreDNS reloads it every 5s
+   (`reload 5s` in the Corefile).
+3. **macOS DNS cache** — if you queried the name before it existed, macOS may cache
+   NXDOMAIN. Flush without restarting Tailscale:
+
+```bash
+sudo dscacheutil -flushcache
+sudo killall -HUP mDNSResponder
+```
+
+Then verify:
+
+```bash
+dig @100.76.205.59 wishly.gavin.myhomecloud.dev +short   # tailnet IP from CoreDNS
+dscacheutil -q host -a name wishly.gavin.myhomecloud.dev  # what SSH uses
+```
+
+Restarting the Tailscale app also clears macOS cache — that's why it seemed to help, but
+it's heavier than a cache flush.
+
 ### Split DNS breaks `api` / `app` hostnames
 
 If Tailscale split DNS sends all of `myhomecloud.dev` to CoreDNS, instance names resolve

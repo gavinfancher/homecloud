@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import threading
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -9,9 +11,14 @@ from proxmoxer import ProxmoxAPI
 
 from homecloud.config import settings
 
+_VM_LIST_CACHE_TTL = 4.0
+
 
 class ProxmoxClient:
     """Thin wrapper around the Proxmox VE API."""
+
+    _vm_list_cache: tuple[float, list[dict]] | None = None
+    _vm_list_cache_lock = threading.Lock()
 
     def __init__(self) -> None:
         self._api = ProxmoxAPI(
@@ -43,13 +50,50 @@ class ProxmoxClient:
                 )
         return templates
 
-    def list_vms(self) -> list[dict]:
+    @staticmethod
+    def invalidate_vm_list_cache() -> None:
+        with ProxmoxClient._vm_list_cache_lock:
+            ProxmoxClient._vm_list_cache = None
+
+    def list_vms(self, *, use_cache: bool = True) -> list[dict]:
+        now = time.time()
+        if use_cache:
+            with ProxmoxClient._vm_list_cache_lock:
+                cached = ProxmoxClient._vm_list_cache
+                if cached and now - cached[0] < _VM_LIST_CACHE_TTL:
+                    return [dict(v) for v in cached[1]]
+
         vms = []
         for vm in self._api.nodes(self.node).qemu.get():
-            config = self._api.nodes(self.node).qemu(vm["vmid"]).config.get()
-            if config.get("template") != 1:
-                vms.append(self.enrich_vm(vm, config))
-        return vms
+            if vm.get("template") == 1:
+                continue
+            vms.append(self._vm_from_list_entry(vm))
+
+        with ProxmoxClient._vm_list_cache_lock:
+            ProxmoxClient._vm_list_cache = (now, vms)
+        return [dict(v) for v in vms]
+
+    def _vm_from_list_entry(self, vm: dict) -> dict:
+        """Build a VM summary from the cluster list response (no per-VM config call)."""
+        memory_mb = vm.get("maxmem")
+        if memory_mb:
+            memory_mb = memory_mb // (1024 * 1024)
+        disk_gb = None
+        if vm.get("maxdisk"):
+            disk_gb = max(1, round(vm["maxdisk"] / (1024 ** 3)))
+        return {
+            "vmid": vm["vmid"],
+            "name": vm.get("name", f"vm-{vm['vmid']}"),
+            "status": vm.get("status"),
+            "cpus": vm.get("cpus"),
+            "cores": vm.get("cpus"),
+            "maxmem": vm.get("maxmem"),
+            "memory_mb": memory_mb,
+            "disk_gb": disk_gb,
+            "uptime": vm.get("uptime", 0),
+            "node": self.node,
+            "pid": vm.get("pid"),
+        }
 
     def get_vm(self, vmid: int) -> dict | None:
         for vm in self._api.nodes(self.node).qemu.get():

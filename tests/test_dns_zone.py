@@ -39,7 +39,7 @@ def test_render_zone_contains_origin():
 
 def test_render_zone_contains_ttl():
     zone = render_zone(SAMPLE_INSTANCES, CONTROL_IP, serial=1)
-    assert "$TTL 60" in zone
+    assert "$TTL 30" in zone
 
 
 def test_render_zone_contains_soa():

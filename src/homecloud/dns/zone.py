@@ -55,7 +55,7 @@ def render_zone(
 
     lines: list[str] = [
         f"$ORIGIN {_domain}.",
-        "$TTL 60",
+        "$TTL 30",
         (
             f"@   IN SOA ns.{_domain}. admin.{_domain}."
             f" ( {_serial} 7200 3600 1209600 60 )"
