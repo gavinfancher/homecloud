@@ -1,0 +1,25 @@
+{
+    # Expose the admin API on all interfaces so the controller container
+    # (a sibling in the compose network) can POST to /reload after writing
+    # new site files.  Only the compose-internal network reaches this port;
+    # it is NOT published to the host.
+    admin 0.0.0.0:2019
+
+    # Disable global auto-HTTPS.  TLS is terminated at the Cloudflare edge;
+    # individual site files use the http:// scheme so Caddy never attempts to
+    # obtain certificates for these hosts.
+    auto_https off
+}
+
+# Control-plane API (phase 09). The Cloudflare Pages SPA calls this host; it is
+# authenticated by Clerk bearer tokens in the app (NOT forward-auth), so no gate
+# here. Keep this host in sync with API_PUBLIC_HOST.
+http://api.myhomecloud.dev {
+    reverse_proxy controller:8080
+}
+
+# Per-host site files (published instance apps) are written by the controller
+# into the shared caddy_sites volume and imported here.  Each carries its own
+# Clerk forward-auth gate (see CADDY_FORWARD_AUTH_UPSTREAM).  After writing a
+# file, the controller POSTs to http://caddy:2019/reload to pick it up.
+import /etc/caddy/sites/*.caddy

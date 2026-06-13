@@ -1,0 +1,11 @@
+myhomecloud.dev {
+    file /etc/coredns/db.myhomecloud.dev
+    reload 5s
+    log
+    errors
+}
+
+. {
+    forward . 1.1.1.1 9.9.9.9
+    cache 30
+}

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Homecloud Console</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">HC</span>
+        <div>
+          <strong>Homecloud</strong>
+          <span class="brand-sub">Compute Console</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="vms">Virtual machines</button>
+        <button class="nav-item" data-view="create">Create instance</button>
+        <button class="nav-item" data-view="images">Machine images</button>
+        <button class="nav-item" data-view="activity">Activity log</button>
+        <button class="nav-item" data-view="settings">Settings</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="status-dot" id="health-dot"></span>
+        <span id="health-label">Checking…</span>
+        <span class="sidebar-tailnet" id="tailnet-label"></span>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div>
+          <p class="breadcrumb" id="breadcrumb">Overview</p>
+          <h1 id="page-title">Dashboard</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn ghost" id="refresh-btn">Refresh</button>
+          <button class="btn primary" id="create-shortcut">Create VM</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <!-- Overview -->
+        <section id="view-overview" class="view">
+          <div class="stats-grid" id="stats-grid"></div>
+          <div class="panel-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Recent activity</h2>
+                <button class="link-btn" data-view-link="activity">View all</button>
+              </div>
+              <div id="overview-activity" class="table-wrap"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Quick actions</h2></div>
+              <div class="quick-actions">
+                <button class="action-card" data-view-link="create">
+                  <strong>Create VM</strong>
+                  <span>Launch a new instance from your base image</span>
+                </button>
+                <button class="action-card" data-view-link="images">
+                  <strong>Build base image</strong>
+                  <span>Rebuild the homecloud-base template</span>
+                </button>
+                <button class="action-card" id="copy-ssh-quick">
+                  <strong>Copy SSH config</strong>
+                  <span>Export ~/.ssh/config entries for all VMs</span>
+                </button>
+              </div>
+              <div class="info-banner" id="setup-banner"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VMs -->
+        <section id="view-vms" class="view hidden">
+          <div class="toolbar">
+            <input type="search" id="vm-search" placeholder="Filter by name, ID, or IP…" />
+            <span class="toolbar-meta" id="vm-count"></span>
+          </div>
+          <div class="panel">
+            <div id="vm-table" class="table-wrap"></div>
+          </div>
+        </section>
+
+        <!-- VM detail -->
+        <section id="view-vm-detail" class="view hidden">
+          <button class="back-btn" id="vm-detail-back">← Back to instances</button>
+          <div id="vm-detail" class="detail-grid"></div>
+        </section>
+
+        <!-- Create -->
+        <section id="view-create" class="view hidden">
+          <div class="create-layout">
+            <form id="deploy-form" class="panel form-panel">
+              <h2>Instance configuration</h2>
+              <fieldset>
+                <legend>Identity</legend>
+                <label>Name <input name="name" pattern="[a-z][a-z0-9-]{1,30}" required placeholder="dagster" /></label>
+                <p class="field-hint">Lowercase letters, numbers, and hyphens. Becomes the Tailscale/MagicDNS hostname.</p>
+              </fieldset>
+              <fieldset>
+                <legend>Machine image</legend>
+                <label>Image
+                  <select name="image_id" id="image-select"></select>
+                </label>
+              </fieldset>
+              <fieldset>
+                <legend>Machine configuration</legend>
+                <div class="slider-field">
+                  <div class="slider-head"><span>vCPUs</span><output id="cores-out">1</output></div>
+                  <input name="cores" type="range" min="1" max="32" value="1" />
+                </div>
+                <div class="slider-field">
+                  <div class="slider-head"><span>Memory (GB)</span><output id="memory-out">2</output></div>
+                  <input name="memory_gb" type="range" min="0.5" max="64" step="0.5" value="2" />
+                </div>
+                <div class="slider-field">
+                  <div class="slider-head"><span>Boot disk (GB)</span><output id="disk-out">20</output></div>
+                  <input name="disk_gb" type="range" min="10" max="500" step="5" value="20" />
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Networking</legend>
+                <dl class="preview-dl">
+                  <dt>MagicDNS</dt><dd><code id="preview-dns">name.tailnet.ts.net</code></dd>
+                  <dt>Tailscale</dt><dd>Auto-join on first boot</dd>
+                  <dt>SSH user</dt><dd><code id="preview-ssh-user">ubuntu</code></dd>
+                </dl>
+              </fieldset>
+              <button type="submit" class="btn primary lg" id="deploy-submit">Create instance</button>
+            </form>
+            <aside class="panel summary-panel">
+              <h2>Summary</h2>
+              <dl class="summary-dl" id="create-summary"></dl>
+              <div class="log-panel">
+                <div class="panel-head"><h3>Provisioning log</h3></div>
+                <pre id="create-log" class="log-view">Submit the form to start provisioning.</pre>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- Images -->
+        <section id="view-images" class="view hidden">
+          <div id="images-grid" class="cards-grid"></div>
+        </section>
+
+        <!-- Activity -->
+        <section id="view-activity" class="view hidden">
+          <div class="activity-layout">
+            <div class="panel">
+              <div class="panel-head"><h2>Jobs</h2></div>
+              <div id="jobs-list" class="jobs-list"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Log output</h2></div>
+              <pre id="job-log" class="log-view tall">Select a job to view logs.</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- Settings -->
+        <section id="view-settings" class="view hidden">
+          <div class="panel-grid">
+            <div class="panel" id="settings-setup">
+              <h2>First-time setup</h2>
+              <p>Paste your laptop SSH public key before building the base image.</p>
+              <textarea id="ssh-key" rows="4" placeholder="ssh-ed25519 AAAA... you@machine"></textarea>
+              <button id="setup-btn" class="btn primary">Save SSH key</button>
+              <p id="setup-msg" class="msg"></p>
+            </div>
+            <div class="panel">
+              <h2>Environment</h2>
+              <dl class="detail-dl" id="env-info"></dl>
+            </div>
+            <div class="panel">
+              <h2>SSH config export</h2>
+              <p>Append these blocks to <code>~/.ssh/config</code> on your laptop.</p>
+              <button id="ssh-export-btn" class="btn">Copy SSH config</button>
+              <pre id="ssh-config-preview" class="log-view"></pre>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <div id="toast-root"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

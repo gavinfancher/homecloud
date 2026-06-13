@@ -1,3 +1,27 @@
 .DS_Store
 .env
 *.local
+
+# SSH keys (mount at runtime; never commit private keys)
+ssh/*-key
+ssh/*-key.pub
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.homecloud/
+
+# Console (future)
+console/node_modules/
+console/.next/
+console/dist/
+
+# Web SPA (Vite build artifacts; source is committed)
+web/node_modules/
+web/dist/
+
+# Agent tooling artifacts (not project code)
+.agents/
+.claude/
+skills-lock.json

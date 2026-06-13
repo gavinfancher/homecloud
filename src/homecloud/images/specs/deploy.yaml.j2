@@ -1,0 +1,27 @@
+#cloud-config
+hostname: {{ hostname }}
+
+{% set _keys = ssh_public_keys if ssh_public_keys is defined and ssh_public_keys else ([ssh_public_key] if ssh_public_key is defined and ssh_public_key else []) %}
+{% if _keys %}
+ssh_authorized_keys:
+{% for key in _keys %}
+  - {{ key }}
+{% endfor %}
+{% endif %}
+
+write_files:
+  - path: /opt/homecloud/join-tailscale.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      tailscale up --reset \
+        --authkey="{{ tailscale_auth_key }}" \
+        --hostname="{{ hostname }}" \
+        --accept-routes
+      tailscale set --auto-update=true
+
+runcmd:
+  - [bash, /opt/homecloud/join-tailscale.sh]
+
+final_message: "homecloud VM {{ hostname }} joined tailnet"

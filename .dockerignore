@@ -1,0 +1,11 @@
+.venv
+.git
+.homecloud
+__pycache__
+*.pyc
+.pytest_cache
+.env
+.gitignore
+
+infra/caddy
+infra/systemd

@@ -1,0 +1,54 @@
+#cloud-config
+hostname: {{ hostname }}
+
+{% if ssh_public_keys %}
+ssh_authorized_keys:
+{% for key in ssh_public_keys %}
+  - {{ key }}
+{% endfor %}
+
+{% endif %}
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - ca-certificates
+  - btop
+  - neovim
+  - tmux
+  - avahi-daemon
+  - qemu-guest-agent
+
+write_files:
+  - path: /opt/homecloud/bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # Docker
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+      https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME:-$VERSION_CODENAME}) stable" \
+        > /etc/apt/sources.list.d/docker.list
+      apt-get update
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      usermod -aG docker {{ ssh_user }}
+
+      # uv
+      curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+      # Tailscale (join at deploy time)
+      curl -fsSL https://tailscale.com/install.sh | sh
+      tailscale set --operator={{ ssh_user }} || true
+
+      touch /var/lib/homecloud/bootstrap.done
+
+runcmd:
+  - [bash, /opt/homecloud/bootstrap.sh]
+  - [systemctl, enable, --now, qemu-guest-agent]
+
+final_message: "homecloud base image bootstrap complete"

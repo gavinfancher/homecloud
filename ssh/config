@@ -1,0 +1,5 @@
+Host pve
+  Hostname 100.106.79.65
+  User root
+  IdentityFile /root/.ssh/macbook-pro-key
+  StrictHostKeyChecking accept-new
