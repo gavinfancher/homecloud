@@ -1,6 +1,6 @@
 # Workers + static assets (Git-connected deploy on push to main).
 # Cloudflare runs: npm run build → npx wrangler deploy
-# Dashboard: root /frontend | build npm run build | deploy npx wrangler deploy
+# Dashboard: root directory MUST be `frontend` (not empty) | build npm run build | deploy npx wrangler deploy
 name = "homecloud"
 compatibility_date = "2026-06-13"
 
