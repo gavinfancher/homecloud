@@ -2,6 +2,8 @@
 
 Spin up Proxmox instances from a Docker-hosted control plane. Instances join your Tailscale tailnet and are reachable via MagicDNS from anywhere.
 
+Deploy tests: backend pushes sync via self-hosted runner; frontend pushes deploy via Cloudflare Workers Git.
+
 ## Repo layout
 
 ```
