@@ -39,8 +39,15 @@ echo "→ Starting stack (controller, caddy, cloudflared, coredns)…"
 compose up -d --remove-orphans
 
 echo "→ Health check…"
-sleep 3
-curl -fsS "http://localhost:${CONTROLLER_PORT:-8080}/api/health" >/dev/null
+deadline=$((SECONDS + 30))
+until curl -fsS "http://localhost:${CONTROLLER_PORT:-8080}/api/health" >/dev/null; do
+  if (( SECONDS >= deadline )); then
+    echo "Controller did not become healthy within 30s" >&2
+    compose ps
+    exit 1
+  fi
+  sleep 2
+done
 echo "✓ Controller healthy on :${CONTROLLER_PORT:-8080}"
 
 compose ps
