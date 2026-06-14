@@ -1,4 +1,4 @@
-# Deploy the console (Cloudflare Pages + GitHub)
+# Deploy the console (Cloudflare Workers + GitHub)
 
 The SPA in `frontend/` is deployed as **static assets on a Cloudflare Worker**
 (Git-connected: build → `wrangler deploy`). You do not need a separate Worker script.
@@ -58,7 +58,7 @@ OWNER_USERNAME=gavin
 Redeploy the stack on the control node after changing `.env`:
 
 ```bash
-make deploy-stack   # or: docker compose up -d --build
+make deploy-stack   # or: docker compose -f infra/docker/docker-compose.yml up -d --build
 ```
 
 ## Troubleshooting

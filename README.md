@@ -2,13 +2,28 @@
 
 Spin up Proxmox instances from a Docker-hosted control plane. Instances join your Tailscale tailnet and are reachable via MagicDNS from anywhere.
 
+## Repo layout
+
+```
+src/homecloud/     # Controller (FastAPI)
+frontend/          # Console SPA (Vite → Cloudflare Workers)
+infra/
+  docker/          # Dockerfile, compose stack
+  caddy/           # Caddy base config
+  coredns/         # CoreDNS Corefile
+scripts/           # Deploy + bootstrap helpers
+tests/             # Pytest suite
+docs/              # Deploy runbooks + archived implementation plan
+```
+
 ## Run (Docker)
 
 On your control node VM:
 
 ```bash
 cp .env.example .env   # PROXMOX_HOST, Tailscale keys, etc.
-docker compose up -d --build
+docker compose -f infra/docker/docker-compose.yml up -d --build
+# or: make deploy-stack
 ```
 
 Open `http://<control-node-tailscale-ip>:8080/`
@@ -62,8 +77,12 @@ No Pi-hole or local network required. Ensure **MagicDNS** is enabled in your [Ta
 
 The `/api/*` endpoints and every published instance app are gated by **Clerk**.
 Set `CLERK_JWKS_URL` + `CLERK_ISSUER` (and `CLERK_AUTHORIZED_PARTIES`) to enforce;
-when unset, auth is disabled for local/dev (logged loudly). The control-plane UI
-is a separate React + Vite SPA in `frontend/` (Cloudflare Pages) — see
-[`docs/deploy-pages.md`](docs/deploy-pages.md) for Git-connected auto-deploy.
+when unset, auth is disabled for local/dev (logged loudly).
+
+The console is a React + Vite SPA in `frontend/`, deployed to **Cloudflare Workers** on
+push to `main` — see [`docs/deploy-frontend.md`](docs/deploy-frontend.md).
+
+Backend deploy: self-hosted GitHub Actions runner on the control node — see
+[`docs/deploy-backend.md`](docs/deploy-backend.md).
 
 Legacy config: [`legacy/initial`](../../tree/legacy/initial) branch.

@@ -1,7 +1,7 @@
 """Unit tests for CloudflareDNS — normalization and disabled-mode no-op.
 
 These tests make NO network calls. Live Cloudflare behaviour is verified
-manually with credentials set (see plan/03-public-dns-cloudflare.md § Testing).
+manually with credentials set (see docs/plan/03-public-dns-cloudflare.md § Testing).
 """
 
 from __future__ import annotations

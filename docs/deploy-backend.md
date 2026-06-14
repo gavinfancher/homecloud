@@ -2,7 +2,7 @@
 
 The backend runs as Docker Compose on a **control node VM** on your tailnet (not on the
 Proxmox host itself). The SPA is deployed separately via Cloudflare — see
-[deploy-pages.md](./deploy-pages.md).
+[deploy-frontend.md](./deploy-frontend.md).
 
 ```
 app.myhomecloud.dev  → Cloudflare Workers (frontend, auto on push)
@@ -26,7 +26,7 @@ api.myhomecloud.dev  → Tunnel → Caddy → controller:8080 (this stack)
 | Trigger | What runs | Where |
 |---------|-----------|-------|
 | PR / push to `main` | **CI** — `pytest`, frontend lint + build | GitHub-hosted (`ci.yml`) |
-| Push to `main` (any change) | **Deploy** — sync `main`, rebuild controller, restart stack |
+| Push to `main` (any change) | **Deploy** — sync `main`, rebuild controller, restart stack | Self-hosted runner on `homecloud` |
 | Push to `main` (`frontend/`) | Cloudflare Workers Git deploy | Cloudflare |
 | Actions → Deploy backend → Run workflow | Manual backend deploy | Self-hosted runner |
 
@@ -163,7 +163,7 @@ CONTROL_NODE_HOST=100.76.205.59 make deploy-remote
 curl -fsS http://localhost:8080/api/health
 curl -fsS https://api.myhomecloud.dev/api/health
 curl -fsS https://api.myhomecloud.dev/api/config   # auth_enabled: true when Clerk is set
-docker compose ps   # controller, caddy, cloudflared, coredns all Up
+docker compose -f infra/docker/docker-compose.yml ps   # controller, caddy, cloudflared, coredns all Up
 ```
 
 Open `https://app.myhomecloud.dev` — Clerk sign-in, API calls to `api.myhomecloud.dev`.
@@ -217,7 +217,7 @@ If `systemd-resolved` holds port 53:
 ```bash
 sudo sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf
 sudo systemctl restart systemd-resolved
-docker compose up -d coredns
+docker compose -f infra/docker/docker-compose.yml up -d coredns
 ```
 
 ### Auth disabled (`auth_enabled: false`)

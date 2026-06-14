@@ -74,8 +74,8 @@ Each brief assumes the agent has the repo and can run `uv`. Replace nothing; the
 the detail.
 
 ### Phase 01 — rename
-> Implement Phase 01. Read `plan/README.md`, `plan/00-architecture.md`, and
-> `plan/01-rename-to-control-plane.md`. Rename the service from "agent" to "controller"
+> Implement Phase 01. Read `docs/plan/README.md`, `docs/plan/00-architecture.md`, and
+> `docs/plan/01-rename-to-control-plane.md`. Rename the service from "agent" to "controller"
 > (settings `controller_host/port` with `AGENT_*` back-compat, entrypoint, docs, UI copy) and do
 > the grep sweep, **without** renaming `/api` routes, Python module paths, the `homecloud`
 > binary, or third-party "guest agent" usages. Keep `proxy/` and `cloudflare/` modules unused.
@@ -83,14 +83,14 @@ the detail.
 > not deploy. Branch `feat/01-rename`, open a PR listing acceptance criteria results.
 
 ### Phase 02 — instance sizes
-> Implement Phase 02. Read `plan/00-architecture.md` and `plan/02-instance-sizes-and-api.md`.
+> Implement Phase 02. Read `docs/plan/00-architecture.md` and `docs/plan/02-instance-sizes-and-api.md`.
 > Add `src/homecloud/sizes.py` with the preset table, `GET /api/sizes`, extend `DeployVMRequest`
 > for `size_id` + custom fallback with clear 400s, and persist `size_id`. Keep the existing
 > custom create path working. Add unit tests for size resolution. No UI. Gate + PR as in Phase
 > 01. Branch `feat/02-sizes`.
 
 ### Phase 03 — Cloudflare DNS
-> Implement Phase 03. Read `plan/00-architecture.md` and `plan/03-public-dns-cloudflare.md`.
+> Implement Phase 03. Read `docs/plan/00-architecture.md` and `docs/plan/03-public-dns-cloudflare.md`.
 > Add the `domain` + `cloudflare_*` settings and `.env.example` entries, then rewrite
 > `src/homecloud/cloudflare/dns.py` to manage proxied CNAMEs per hostname idempotently, with
 > `ensure_record`/`delete_record` and a disabled-mode no-op. Support multi-label labels like
@@ -98,7 +98,7 @@ the detail.
 > `feat/03-cloudflare-dns`.
 
 ### Phase 04 — Caddy + Tunnel
-> Implement Phase 04. Read `plan/00-architecture.md` and `plan/04-reverse-proxy-and-tunnel.md`
+> Implement Phase 04. Read `docs/plan/00-architecture.md` and `docs/plan/04-reverse-proxy-and-tunnel.md`
 > (depends on Phase 03). Rewire `src/homecloud/proxy/caddy.py` to the new settings; add the
 > `infra/caddy/Caddyfile`, the control-node compose services (caddy, cloudflared) with shared
 > volumes, and a `publish_web`/`unpublish_web` helper that writes the Caddy site, calls Phase 03
@@ -106,15 +106,15 @@ the detail.
 > contents. Gate + PR. Branch `feat/04-proxy-tunnel`.
 
 ### Phase 05 — port discovery + service routing
-> Implement Phase 05. Read `plan/00-architecture.md` and
-> `plan/05-port-discovery-and-service-routing.md` (depends on Phase 04). Add
+> Implement Phase 05. Read `docs/plan/00-architecture.md` and
+> `docs/plan/05-port-discovery-and-service-routing.md` (depends on Phase 04). Add
 > `src/homecloud/ports.py` (`ss` over SSH, guest-agent fallback, parser), the scan job, and the
 > `/scan-ports`, `/ports`, `/services` endpoints wired to `publish_web`/`unpublish_web`. Flag
 > loopback-only ports as not publishable. Unit-test the parser with fixtures. Gate + PR. Branch
 > `feat/05-ports`.
 
 ### Phase 06 — private split DNS
-> Implement Phase 06. Read `plan/00-architecture.md` and `plan/06-private-split-dns.md`
+> Implement Phase 06. Read `docs/plan/00-architecture.md` and `docs/plan/06-private-split-dns.md`
 > (depends on Phase 03 settings/state, independent of 04). Add `infra/coredns/Corefile`, the
 > coredns compose service, and `src/homecloud/dns/zone.py` (`render_zone` + `write_zone` with a
 > monotonic serial and disabled no-op). Regenerate the zone on instance/service changes.
@@ -122,14 +122,14 @@ the detail.
 > `feat/06-split-dns`.
 
 ### Phase 07 — SSH key in base image
-> Implement Phase 07. Read `plan/00-architecture.md` and `plan/07-ssh-key-base-image.md`
+> Implement Phase 07. Read `docs/plan/00-architecture.md` and `docs/plan/07-ssh-key-base-image.md`
 > (depends on Phase 02). Verify the key is baked at base-image build and survives templating;
 > support multiple keys (`ssh_public_keys`) with back-compat; ensure controller→instance SSH
 > works non-interactively; surface the "rebuild required for new keys" note. Unit-test
 > single/many key setup. Gate + PR. Branch `feat/07-ssh-key`.
 
 ### Phase 08 — web UI
-> Implement Phase 08. Read `plan/00-architecture.md` and `plan/08-web-ui.md` (after 02–06).
+> Implement Phase 08. Read `docs/plan/00-architecture.md` and `docs/plan/08-web-ui.md` (after 02–06).
 > Extend the vanilla-JS console: size selector + custom on create, a Networking panel on the
 > instance detail (public web services + private tailnet access), port scan/publish/unpublish
 > flows, and Activity-log surfacing of DNS/proxy/zone jobs. Degrade gracefully when

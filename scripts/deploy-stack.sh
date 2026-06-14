@@ -5,6 +5,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+COMPOSE_FILE="$ROOT/infra/docker/docker-compose.yml"
+compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
 if git rev-parse --git-dir >/dev/null 2>&1; then
   exec "$ROOT/scripts/control-node-deploy.sh"
@@ -16,14 +18,14 @@ if [[ ! -f .env ]]; then
 fi
 
 echo "→ Building controller image…"
-docker compose build controller
+compose build controller
 
 echo "→ Starting stack (controller, caddy, cloudflared, coredns)…"
-docker compose up -d --remove-orphans
+compose up -d --remove-orphans
 
 echo "→ Health check…"
 sleep 2
 curl -fsS "http://localhost:${CONTROLLER_PORT:-8080}/api/health" >/dev/null
 echo "✓ Controller healthy on :${CONTROLLER_PORT:-8080}"
 
-docker compose ps
+compose ps

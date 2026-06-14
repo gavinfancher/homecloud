@@ -8,9 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN pip install --no-cache-dir .
-
-COPY docker-entrypoint.sh /usr/local/bin/
+COPY infra/docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8080
