@@ -64,7 +64,8 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
           </button>
         </header>
 
-        <form className="modal-body" onSubmit={submit}>
+        <form className="modal-form" onSubmit={submit}>
+          <div className="modal-body">
           {!baseReady && (
             <div className="callout callout-warn">
               The base image is not built yet. Build it from the Images tab first.
@@ -148,6 +149,7 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
               Image: <code>{baseImage.name}</code> — {baseImage.description}
             </div>
           )}
+          </div>
 
           <footer className="modal-foot">
             <button type="button" className="btn btn-ghost" onClick={onClose}>

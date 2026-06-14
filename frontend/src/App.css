@@ -1015,6 +1015,12 @@ textarea {
   margin: 0;
   font-size: 16px;
 }
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
 .modal-body {
   padding: 18px;
   display: flex;
@@ -1029,16 +1035,10 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: auto;
-  padding-top: 12px;
-  position: sticky;
-  bottom: 0;
+  flex-shrink: 0;
+  padding: 12px 18px;
   background: var(--panel);
   border-top: 1px solid var(--border-soft);
-  margin-left: -18px;
-  margin-right: -18px;
-  padding-left: 18px;
-  padding-right: 18px;
 }
 
 .size-options {
@@ -1087,6 +1087,11 @@ textarea {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+@media (max-width: 480px) {
+  .custom-specs {
+    grid-template-columns: 1fr;
+  }
 }
 .num-field {
   display: flex;
