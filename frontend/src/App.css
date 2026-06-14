@@ -263,6 +263,13 @@ textarea {
 }
 .sidebar-foot {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.console-version {
+  font-size: 11px;
+  padding: 0 10px;
 }
 .tailnet-badge {
   display: flex;

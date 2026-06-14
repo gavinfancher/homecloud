@@ -14,6 +14,7 @@ import { JobDrawer } from './components/JobDrawer'
 import { ToastProvider } from './components/Toast'
 import { StatusDot } from './components/ui'
 import { BYPASS_AUTH, noToken } from './lib/auth'
+import { APP_VERSION } from './lib/version'
 import { StoreProvider, useStore } from './lib/store'
 import { Activity } from './views/Activity'
 import { Images } from './views/Images'
@@ -116,6 +117,9 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
             <StatusDot status={dashboard?.tailscale_tailnet ? 'running' : 'stopped'} />
             <span>{dashboard?.tailscale_tailnet || 'no tailnet'}</span>
           </div>
+          <span className="console-version muted" title="SPA build version">
+            v{APP_VERSION}
+          </span>
         </div>
       </aside>
 
