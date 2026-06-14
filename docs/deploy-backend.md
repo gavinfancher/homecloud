@@ -26,7 +26,7 @@ api.myhomecloud.dev  → Tunnel → Caddy → controller:8080 (this stack)
 | Trigger | What runs | Where |
 |---------|-----------|-------|
 | PR / push to `main` | **CI** — `pytest`, frontend lint + build | GitHub-hosted (`ci.yml`) |
-| Push to `main` (backend paths) | **Deploy** — `control-node-deploy.sh` | Self-hosted runner on `homecloud` |
+| Push to `main` (any change) | **Deploy** — sync `main`, rebuild controller, restart stack |
 | Push to `main` (`frontend/`) | Cloudflare Workers Git deploy | Cloudflare |
 | Actions → Deploy backend → Run workflow | Manual backend deploy | Self-hosted runner |
 
@@ -155,7 +155,7 @@ cd ~/homecloud
 CONTROL_NODE_HOST=100.76.205.59 make deploy-remote
 ```
 
-**Automatic:** merge to `main` with backend file changes (after the self-hosted runner is installed).
+**Automatic:** any merge to `main` (after the self-hosted runner is installed).
 
 ## Verify
 

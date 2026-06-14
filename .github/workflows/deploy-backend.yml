@@ -3,17 +3,6 @@ name: Deploy backend
 on:
   push:
     branches: [main]
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "docker-compose.yml"
-      - "Dockerfile"
-      - "docker-entrypoint.sh"
-      - "pyproject.toml"
-      - "infra/**"
-      - "scripts/control-node-deploy.sh"
-      - "scripts/bootstrap-control-node.sh"
-      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
 concurrency:
