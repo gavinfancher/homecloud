@@ -23,25 +23,55 @@ api.myhomecloud.dev  → Tunnel → Caddy → controller:8080 (this stack)
 
 ## CI/CD (recommended)
 
-| Trigger | What runs |
-|---------|-----------|
-| PR / push to `main` | **CI** — `pytest`, frontend lint + build (`.github/workflows/ci.yml`) |
-| Push to `main` (backend paths) | **Deploy** — SSH to control node, `git pull`, `docker compose up` |
-| Push to `main` (`frontend/`) | Cloudflare Workers Git deploy (dashboard) |
+| Trigger | What runs | Where |
+|---------|-----------|-------|
+| PR / push to `main` | **CI** — `pytest`, frontend lint + build | GitHub-hosted (`ci.yml`) |
+| Push to `main` (backend paths) | **Deploy** — `control-node-deploy.sh` | Self-hosted runner on `homecloud` |
+| Push to `main` (`frontend/`) | Cloudflare Workers Git deploy | Cloudflare |
+| Actions → Deploy backend → Run workflow | Manual backend deploy | Self-hosted runner |
 
-### GitHub Actions secrets (production environment)
+### Self-hosted runner (deploy)
 
-Create a **production** environment in GitHub → Settings → Environments, then add:
+The deploy workflow runs on a **self-hosted runner** installed on the control node VM. GitHub
+queues the job; the runner on `homecloud` picks it up and runs `~/homecloud/scripts/control-node-deploy.sh` locally — no SSH, no Tailscale OAuth, no deploy secrets.
 
-| Secret | Example | Notes |
-|--------|---------|-------|
-| `DEPLOY_SSH_PRIVATE_KEY` | ed25519 private key | Dedicated deploy key — not your personal key |
-| `CONTROL_NODE_HOST` | `100.76.205.59` | Tailnet IP of control node VM |
-| `CONTROL_NODE_USER` | `ubuntu` | SSH user on control node |
+**Pros:** Simple, fast, works on a tailnet-only VM, no ACL/OAuth setup.  
+**Cons:** Runner is a persistent process on the VM; only use on **private** repos (or lock down who can trigger workflows).
 
-**One-time:** add the deploy public key to `~ubuntu/.ssh/authorized_keys` on the control node.
+#### One-time: install the runner on homecloud
 
-If secrets are unset, the deploy workflow skips gracefully (CI still runs).
+```bash
+ssh ubuntu@100.76.205.59
+cd ~/homecloud && git pull   # get install-github-runner.sh
+
+# GitHub → repo Settings → Actions → Runners → New self-hosted runner → Linux x64
+# Copy the registration token (expires in ~1 hour)
+export RUNNER_TOKEN='paste-token-here'
+./scripts/install-github-runner.sh
+```
+
+Verify in GitHub → **Settings → Actions → Runners** — you should see `homecloud` with labels
+`self-hosted`, `linux`, `homecloud` (idle or active).
+
+The workflow matches `runs-on: [self-hosted, linux, homecloud]`. Re-run the install script
+with a new `RUNNER_TOKEN` if you need to re-register.
+
+**Runner user:** the script installs the service as your current user (`ubuntu`). That user
+must be able to run `docker compose` (same as manual deploy).
+
+Optional: add a **production** environment in GitHub for approval gates before deploy — no
+secrets required for the self-hosted path.
+
+<details>
+<summary>Alternative: hosted runners + Tailscale (not used by default)</summary>
+
+If you cannot install a runner on the VM, hosted runners can join the tailnet via
+[`tailscale/github-action@v4`](https://github.com/tailscale/github-action) then SSH. Requires
+OAuth client with `tag:ci`, `grants` for port 22, and secrets `TAILSCALE_OAUTH_*`,
+`DEPLOY_SSH_PRIVATE_KEY`, `CONTROL_NODE_HOST`, `CONTROL_NODE_USER`. See Tailscale’s
+[CI/CD guide](https://tailscale.com/docs/solutions/connect-github-CICD-workflows-to-private-infrastructure-without-public-exposure).
+
+</details>
 
 ## One-time bootstrap (control node VM)
 
@@ -125,7 +155,7 @@ cd ~/homecloud
 CONTROL_NODE_HOST=100.76.205.59 make deploy-remote
 ```
 
-**Automatic:** merge to `main` with backend file changes (after GitHub secrets are set).
+**Automatic:** merge to `main` with backend file changes (after the self-hosted runner is installed).
 
 ## Verify
 

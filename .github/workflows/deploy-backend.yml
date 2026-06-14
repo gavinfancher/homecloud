@@ -14,6 +14,7 @@ on:
       - "scripts/control-node-deploy.sh"
       - "scripts/bootstrap-control-node.sh"
       - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
 
 concurrency:
   group: deploy-backend
@@ -21,21 +22,9 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Self-hosted runner on the control node — see scripts/install-github-runner.sh
+    runs-on: [self-hosted, linux, homecloud]
     environment: production
     steps:
-      - name: Deploy to control node
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          HOST: ${{ secrets.CONTROL_NODE_HOST }}
-          USER: ${{ secrets.CONTROL_NODE_USER }}
-        run: |
-          if [[ -z "$SSH_PRIVATE_KEY" || -z "$HOST" || -z "$USER" ]]; then
-            echo "Skipping deploy: set DEPLOY_SSH_PRIVATE_KEY, CONTROL_NODE_HOST, CONTROL_NODE_USER in the production environment."
-            exit 0
-          fi
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-            "${USER}@${HOST}" 'cd ~/homecloud && ./scripts/control-node-deploy.sh'
+      - name: Deploy stack
+        run: cd ~/homecloud && ./scripts/control-node-deploy.sh
