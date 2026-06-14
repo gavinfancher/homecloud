@@ -740,6 +740,8 @@ textarea {
 }
 .instance-specs {
   font-size: 12.5px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .instance-actions {
   display: flex;

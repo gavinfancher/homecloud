@@ -24,12 +24,14 @@ export function Instances() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'running' | 'stopped'>('all')
 
-  const filtered = vms.filter((vm) => {
-    if (query && !vm.name.toLowerCase().includes(query.toLowerCase())) return false
-    if (filter === 'running') return vm.status === 'running'
-    if (filter === 'stopped') return vm.status !== 'running'
-    return true
-  })
+  const filtered = vms
+    .filter((vm) => {
+      if (query && !vm.name.toLowerCase().includes(query.toLowerCase())) return false
+      if (filter === 'running') return vm.status === 'running'
+      if (filter === 'stopped') return vm.status !== 'running'
+      return true
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
     <div className="view">

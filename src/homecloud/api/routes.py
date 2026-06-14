@@ -43,7 +43,15 @@ def _merge_registered(vms: list[dict]) -> list[dict]:
     for vm in vms:
         name = vm.get("name", "")
         if name in registered:
-            vm.update(registered[name])
+            reg = registered[name]
+            vm.update(reg)
+            # Proxmox list API omits disk on some builds; keep registry values.
+            if vm.get("disk_gb") is None and reg.get("disk_gb") is not None:
+                vm["disk_gb"] = reg["disk_gb"]
+            if vm.get("cores") is None and reg.get("cores") is not None:
+                vm["cores"] = reg["cores"]
+            if vm.get("memory_gb") is None and reg.get("memory_gb") is not None:
+                vm["memory_gb"] = reg["memory_gb"]
         # Always expose current MagicDNS hostname (migrates away from legacy .home records)
         if name:
             if vm.get("tailscale_ip") or vm.get("ip"):
@@ -53,8 +61,17 @@ def _merge_registered(vms: list[dict]) -> list[dict]:
                 vm["hostname"] = vm_fqdn(name)
                 vm["magic_dns"] = vm_fqdn(name)
         if vm.get("memory_gb") is None and vm.get("memory_mb"):
-            vm["memory_gb"] = round(vm["memory_mb"] / 1024, 2)
+            # maxmem from the cluster list is bytes; config memory is MB.
+            mb = vm["memory_mb"]
+            if mb > 10000:
+                mb = mb // (1024 * 1024)
+            vm["memory_gb"] = round(mb / 1024, 2)
     return vms
+
+
+def _sort_vms(vms: list[dict]) -> list[dict]:
+    """Stable list order — Proxmox cluster list order is not consistent across polls."""
+    return sorted(vms, key=lambda v: ((v.get("name") or "").lower(), v.get("vmid") or 0))
 
 
 @public_router.get("/health")
@@ -105,7 +122,7 @@ def auth_verify(request: Request):
 def dashboard() -> dict:
     hydrate_registry()
     proxmox = ProxmoxClient()
-    vms = _merge_registered(proxmox.list_vms())
+    vms = _sort_vms(_merge_registered(proxmox.list_vms()))
     templates = proxmox.list_templates()
     running = sum(1 for vm in vms if vm.get("status") == "running")
     return {
@@ -251,7 +268,7 @@ def cancel_job(job_id: str) -> dict:
 @router.get("/vms")
 def list_vms() -> list[dict]:
     proxmox = ProxmoxClient()
-    return _merge_registered(proxmox.list_vms())
+    return _sort_vms(_merge_registered(proxmox.list_vms()))
 
 
 @router.get("/vms/{vmid}")
