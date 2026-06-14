@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 STACK_COMPOSE="$ROOT/infra/docker/docker-compose.yml"
-compose() { docker compose -f "$STACK_COMPOSE" "$@"; }
+compose() { docker compose -f "$STACK_COMPOSE" --env-file "$ROOT/.env" "$@"; }
 
 if [[ ! -f .env ]]; then
   echo "Missing .env — copy .env.example and fill secrets first." >&2

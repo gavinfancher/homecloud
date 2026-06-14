@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 STACK_COMPOSE="$ROOT/infra/docker/docker-compose.yml"
-compose() { docker compose -f "$STACK_COMPOSE" "$@"; }
+compose() { docker compose -f "$STACK_COMPOSE" --env-file "$ROOT/.env" "$@"; }
 
 if git rev-parse --git-dir >/dev/null 2>&1; then
   exec "$ROOT/scripts/control-node-deploy.sh"
