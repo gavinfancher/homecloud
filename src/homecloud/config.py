@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     )
 
     # Public domain
-    domain: str = "myhomecloud.dev"
+    domain: str = "mycloud.gavinf.com"
 
     # Cloudflare
     cloudflare_api_token: str = ""
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     caddy_reload_cmd: str = ""
 
     # Local resolver (split DNS)
-    coredns_zone_path: str = "/etc/coredns/db.myhomecloud.dev"
+    coredns_zone_path: str = "/etc/coredns/db.mycloud.gavinf.com"
     coredns_reload_cmd: str = ""
     control_node_tailscale_ip: str = ""
 
