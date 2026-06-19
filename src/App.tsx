@@ -31,7 +31,7 @@ export default function App() {
               <Dashboard />
             </Show>
             <Show when="signed-out">
-              <RedirectToSignIn signInUrl="https://auth.gavinf.com" />
+              <RedirectToSignIn />
             </Show>
           </>
         ) : null}
