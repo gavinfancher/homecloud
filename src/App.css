@@ -108,7 +108,27 @@ body {
   letter-spacing: -0.8px;
   color: var(--text);
   line-height: 1.1;
-  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .land-title {
+    font-size: 26px;
+    letter-spacing: -0.5px;
+  }
+
+  .land-hero {
+    padding: 0 20px;
+    align-items: flex-start;
+    padding-top: 60px;
+  }
+
+  .land-hero-content {
+    text-align: left;
+  }
+
+  .land-footer-row {
+    align-items: flex-start;
+  }
 }
 
 .land-desc {
