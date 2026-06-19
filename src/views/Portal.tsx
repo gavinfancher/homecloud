@@ -18,7 +18,6 @@ export function Portal() {
             <SignIn
               routing="hash"
               fallbackRedirectUrl="https://dash.gavinf.com"
-              forceRedirectUrl="https://dash.gavinf.com"
             />
           </main>
         </div>
