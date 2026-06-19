@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@clerk/react": "^6.9.1",
+    "@clerk/themes": "^2.4.57",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
@@ -24,5 +25,11 @@
     "typescript": "~6.0.2",
     "vite": "^8.0.12",
     "wrangler": "^4.100.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true,
+    "sharp@0.34.5": true,
+    "workerd@1.20260617.1": true
   }
 }

@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { UserButton } from '@clerk/react'
-import { IconCloud, IconGlobe } from '../Icons'
+import { IconCloud, IconCloudMark } from '../Icons'
 
 type Service = {
   id: string
@@ -23,14 +23,16 @@ const SERVICES: Service[] = [
 ]
 
 export function Dashboard() {
+  useEffect(() => { document.title = 'Dashboard' }, [])
   return (
     <div className="dash-shell">
       <header className="dash-header">
-        <a className="dash-header-brand" href="https://gavinf.com">
-          <IconGlobe size={16} />
-          gavinf.com
-        </a>
-        <div className="spacer" />
+        <div className="dash-brand">
+          <div className="land-logo-mark">
+            <IconCloudMark size={18} />
+          </div>
+          <span>Dashboard</span>
+        </div>
         <UserButton />
       </header>
 

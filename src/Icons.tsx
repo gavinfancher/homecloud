@@ -1,5 +1,19 @@
 type IconProps = { size?: number; width?: number; height?: number }
 
+export function IconCloudMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path
+        d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.34 9.5 4 4 0 0 0 7 19z"
+        stroke="#3b82f6"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 export function IconCloud({ size = 20, width, height }: IconProps) {
   const w = width ?? size
   const h = height ?? size
