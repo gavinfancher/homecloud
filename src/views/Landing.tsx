@@ -16,7 +16,7 @@ export function Landing() {
         <div className="land-hero-content">
           <h1 className="land-title">Personal Cloud Infrastructure</h1>
           <p className="land-desc">
-            A portal for managing self-hosted infrastructure,{' '}
+            My portal for managing self-hosted infrastructure,{' '}
             <br />VM instances, and other services.
           </p>
           <div className="land-footer-row">
