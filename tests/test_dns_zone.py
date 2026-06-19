@@ -51,7 +51,7 @@ def test_render_zone_contains_soa():
 def test_render_zone_contains_ns():
     zone = render_zone(SAMPLE_INSTANCES, CONTROL_IP, serial=1)
     assert "IN NS" in zone
-    assert "ns.myhomecloud.dev." in zone
+    assert "ns.vm.mycloud.gavinf.com." in zone
 
 
 def test_render_zone_contains_ns_a_record():

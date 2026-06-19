@@ -60,14 +60,14 @@ def test_controller_host_via_legacy_agent_host():
 def test_optional_settings_have_safe_defaults():
     """Phase 03-06 settings default to empty/safe values so dev runs work."""
     s = _load_settings()
-    assert s.domain == "myhomecloud.dev"
+    assert s.domain == "vm.mycloud.gavinf.com"
     assert s.cloudflare_api_token == ""
     assert s.cloudflare_zone_id == ""
     assert s.cloudflare_tunnel_id == ""
     assert s.cloudflare_tunnel_cname == ""
     assert s.caddy_config_dir == "/etc/caddy/sites"
     assert s.caddy_reload_cmd == ""
-    assert s.coredns_zone_path == "/etc/coredns/db.myhomecloud.dev"
+    assert s.coredns_zone_path == "/etc/coredns/db.vm.mycloud.gavinf.com"
     assert s.coredns_reload_cmd == ""
     assert s.control_node_tailscale_ip == ""
     assert s.default_web_port == 80
