@@ -1,8 +1,8 @@
 # Instance hostnames (dagster.gavin, etc.) come from the generated zone file.
 # Control-plane hosts (api, app) are NOT in the zone — fallthrough forwards them
 # to public DNS (Cloudflare) so the SPA and API keep working on the tailnet.
-mycloud.gavinf.com {
-    file /etc/coredns/db.mycloud.gavinf.com mycloud.gavinf.com {
+vm.mycloud.gavinf.com {
+    file /etc/coredns/db.vm.mycloud.gavinf.com vm.mycloud.gavinf.com {
         reload 5s
         fallthrough
     }
