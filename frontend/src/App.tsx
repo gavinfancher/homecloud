@@ -1,4 +1,4 @@
-import { Show, SignIn, UserButton, useAuth } from '@clerk/react'
+import { RedirectToSignIn, Show, UserButton, useAuth } from '@clerk/react'
 import { useCallback, type ReactNode } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
@@ -46,14 +46,7 @@ export default function App() {
   return (
     <ToastProvider>
       <Show when="signed-out">
-        <div className="signin-wrap">
-          <div className="signin-brand">
-            <IconCloud width={40} height={40} />
-            <h1>homecloud</h1>
-          </div>
-          <p className="tagline">Your self-hosted cloud control plane.</p>
-          <SignIn />
-        </div>
+        <RedirectToSignIn redirectUrl="https://mycloud.gavinf.com" />
       </Show>
       <Show when="signed-in">
         <ClerkStoreProvider>

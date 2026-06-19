@@ -18,7 +18,11 @@ createRoot(document.getElementById('root')!).render(
       {BYPASS_AUTH ? (
         <App />
       ) : (
-        <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
+        <ClerkProvider
+          publishableKey={PUBLISHABLE_KEY}
+          signInUrl="https://auth.gavinf.com"
+          afterSignOutUrl="https://gavinf.com"
+        >
           <App />
         </ClerkProvider>
       )}
