@@ -12,7 +12,7 @@ const isAuth = hostname === 'auth.gavinf.com' || devView === 'auth'
 const isDash = hostname === 'dash.gavinf.com' || devView === 'dash'
 
 export default function App() {
-  if (isLanding) return <Landing />
+  if (isLanding || (!isAuth && !isDash)) return <Landing />
 
   return (
     <ClerkProvider
