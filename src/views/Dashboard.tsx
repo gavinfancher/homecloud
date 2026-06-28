@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { UserButton } from '@clerk/react'
-import { IconCloud, IconCloudMark, IconNas } from '../Icons'
+import { IconCloud, IconCloudMark, IconNas, IconHypervisor } from '../Icons'
 
 type Service = {
   id: string
@@ -26,6 +26,14 @@ const SERVICES: Service[] = [
     desc: 'TrueNAS storage, datasets & file shares',
     href: 'https://nas.gavinf.com',
     icon: <IconNas />,
+    live: true,
+  },
+  {
+    id: 'pve',
+    name: 'pve',
+    desc: 'Proxmox hypervisor, VMs & cluster management',
+    href: 'https://pve.gavinf.com',
+    icon: <IconHypervisor />,
     live: true,
   },
 ]
