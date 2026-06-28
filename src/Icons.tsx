@@ -24,6 +24,18 @@ export function IconCloud({ size = 20, width, height }: IconProps) {
   )
 }
 
+export function IconNas({ size = 20, width, height }: IconProps) {
+  const w = width ?? size
+  const h = height ?? size
+  return (
+    <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="7" rx="1.5" />
+      <rect x="3" y="13" width="18" height="7" rx="1.5" />
+      <path d="M7 7.5h.01M7 16.5h.01" />
+    </svg>
+  )
+}
+
 export function IconGlobe({ size = 20, width, height }: IconProps) {
   const w = width ?? size
   const h = height ?? size
