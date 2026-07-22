@@ -6,6 +6,6 @@ Host pve
 
 # Control node VM (optional — for ssh ubuntu@homecloud from your laptop)
 Host homecloud
-  Hostname 100.76.205.59
+  Hostname 100.74.161.39
   User ubuntu
   StrictHostKeyChecking accept-new

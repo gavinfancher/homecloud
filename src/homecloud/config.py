@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     proxmox_token_value: str = ""
     proxmox_verify_ssl: bool = False
     proxmox_node: str = "pve-root"
-    proxmox_storage: str = "ssd-pool"
+    proxmox_storage: str = "local-lvm"
     proxmox_bridge: str = "vmbr0"
     proxmox_snippets_dir: str = "/var/lib/vz/snippets"
     proxmox_ssh_host: str = ""
