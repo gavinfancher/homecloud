@@ -9,6 +9,7 @@ Deploy tests: backend pushes sync via self-hosted runner; frontend pushes deploy
 ```
 src/homecloud/     # Controller (FastAPI)
 frontend/          # Console SPA (Vite → Cloudflare Workers)
+dashboard/         # dash.gavinf.com portal SPA (Vite → Cloudflare Workers)
 infra/
   docker/          # Dockerfile, compose stack
   caddy/           # Caddy base config
