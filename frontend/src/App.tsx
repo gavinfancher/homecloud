@@ -11,6 +11,7 @@ import {
   IconSettings,
 } from './components/Icons'
 import { JobDrawer } from './components/JobDrawer'
+import { PortalRail } from './PortalRail'
 import { ToastProvider } from './components/Toast'
 import { StatusDot } from './components/ui'
 import { BYPASS_AUTH, noToken } from './lib/auth'
@@ -85,6 +86,7 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
 
   return (
     <div className="shell">
+      <PortalRail active="homecloud" />
       <aside className="sidebar">
         <NavLink to="/overview" className="sidebar-brand" title="Overview">
           <IconCloud width={22} height={22} />
@@ -106,9 +108,6 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <a className="muted small" href="https://dash.gavinf.com" title="Back to dash.gavinf.com">
-            ← dash
-          </a>
           <div className="tailnet-badge">
             <StatusDot status={dashboard?.tailscale_tailnet ? 'running' : 'stopped'} />
             <span>{dashboard?.tailscale_tailnet || 'no tailnet'}</span>

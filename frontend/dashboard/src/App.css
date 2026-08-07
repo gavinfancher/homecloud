@@ -293,3 +293,88 @@ body {
 .dot-live {
   background: var(--ok);
 }
+
+/* ── Portal rail (shared with homecloud console + proxmox shell) ── */
+
+.portal-rail {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 1000;
+  width: 56px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 11px;
+  transition: width 0.16s ease;
+}
+
+.portal-rail:hover {
+  width: 220px;
+}
+
+.portal-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.portal-rail-item:hover,
+.portal-rail-item.active {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.portal-rail-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portal-rail-mark {
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+.portal-rail-brand {
+  height: 42px;
+  color: var(--text);
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.portal-rail-label {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.portal-rail:hover .portal-rail-label {
+  opacity: 1;
+}
+
+.portal-rail-sep {
+  height: 1px;
+  flex-shrink: 0;
+  background: var(--border);
+  margin: 4px 2px 8px;
+}
+
+.dash-shell {
+  margin-left: 56px;
+}

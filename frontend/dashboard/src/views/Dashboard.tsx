@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { UserButton } from '@clerk/react'
-import { IconCloud, IconCloudMark, IconHypervisor } from '../Icons'
+import { IconCloud, IconHypervisor } from '../Icons'
+import { PortalRail } from '../PortalRail'
 
 type Service = {
   id: string
@@ -34,13 +35,9 @@ export function Dashboard() {
   useEffect(() => { document.title = 'Dashboard' }, [])
   return (
     <div className="dash-shell">
+      <PortalRail active="dashboard" />
       <header className="dash-header">
-        <div className="dash-brand">
-          <div className="land-logo-mark">
-            <IconCloudMark size={18} />
-          </div>
-          <span>Dashboard</span>
-        </div>
+        <div className="spacer" />
         <UserButton />
       </header>
 
