@@ -15,7 +15,7 @@ jobs:
     environment: production
     defaults:
       run:
-        working-directory: dashboard
+        working-directory: frontend/dashboard
     steps:
       - uses: actions/checkout@v4
 
@@ -23,12 +23,14 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: dashboard/package-lock.json
+          cache-dependency-path: frontend/dashboard/package-lock.json
 
       - name: Install
         run: npm ci
 
       - name: Build
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: npm run build
 
       - name: Deploy to Cloudflare Workers
