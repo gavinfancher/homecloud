@@ -24,7 +24,7 @@ class _DisabledDNS(CloudflareDNS):
         self.token = ""
         self.zone_id = ""
         self.tunnel_cname = ""
-        self.domain = "myhomecloud.dev"
+        self.domain = "homecloud.dev"
 
 
 class _EnabledDNS(CloudflareDNS):
@@ -35,7 +35,7 @@ class _EnabledDNS(CloudflareDNS):
         self.token = "fake-token"
         self.zone_id = "fake-zone-id"
         self.tunnel_cname = "fake-uuid.cfargotunnel.com"
-        self.domain = "myhomecloud.dev"
+        self.domain = "homecloud.dev"
 
 
 # ---------------------------------------------------------------------------
@@ -80,15 +80,15 @@ def test_enabled_false_when_tunnel_cname_missing():
     "host_label, expected_label, expected_fqdn",
     [
         # bare single-label
-        ("app", "app", "app.myhomecloud.dev"),
+        ("app", "app", "app.homecloud.dev"),
         # multi-label (dots in the label)
-        ("grafana.app", "grafana.app", "grafana.app.myhomecloud.dev"),
+        ("grafana.app", "grafana.app", "grafana.app.homecloud.dev"),
         # full FQDN single-label
-        ("app.myhomecloud.dev", "app", "app.myhomecloud.dev"),
+        ("app.homecloud.dev", "app", "app.homecloud.dev"),
         # full FQDN multi-label
-        ("grafana.app.myhomecloud.dev", "grafana.app", "grafana.app.myhomecloud.dev"),
+        ("grafana.app.homecloud.dev", "grafana.app", "grafana.app.homecloud.dev"),
         # deeper label
-        ("api.grafana.app", "api.grafana.app", "api.grafana.app.myhomecloud.dev"),
+        ("api.grafana.app", "api.grafana.app", "api.grafana.app.homecloud.dev"),
     ],
 )
 def test_normalize(host_label: str, expected_label: str, expected_fqdn: str) -> None:
@@ -119,7 +119,7 @@ def test_ensure_record_disabled_returns_skipped(monkeypatch: pytest.MonkeyPatch)
 
     result = dns.ensure_record("app")
 
-    assert result == {"skipped": True, "hostname": "app.myhomecloud.dev"}
+    assert result == {"skipped": True, "hostname": "app.homecloud.dev"}
 
 
 def test_ensure_record_disabled_multi_label(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -129,7 +129,7 @@ def test_ensure_record_disabled_multi_label(monkeypatch: pytest.MonkeyPatch) -> 
     result = dns.ensure_record("grafana.app")
 
     assert result["skipped"] is True
-    assert result["hostname"] == "grafana.app.myhomecloud.dev"
+    assert result["hostname"] == "grafana.app.homecloud.dev"
 
 
 def test_ensure_record_disabled_fqdn_input(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,10 +137,10 @@ def test_ensure_record_disabled_fqdn_input(monkeypatch: pytest.MonkeyPatch) -> N
     dns = _DisabledDNS()
     monkeypatch.setattr(dns, "_client", _make_fail_client())
 
-    result = dns.ensure_record("app.myhomecloud.dev")
+    result = dns.ensure_record("app.homecloud.dev")
 
     assert result["skipped"] is True
-    assert result["hostname"] == "app.myhomecloud.dev"
+    assert result["hostname"] == "app.homecloud.dev"
 
 
 def test_delete_record_disabled_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:

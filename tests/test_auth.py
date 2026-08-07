@@ -87,16 +87,16 @@ def test_verify_token_expired_rejected(monkeypatch, keypair):
 
 
 def test_verify_token_unauthorized_azp_rejected(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair, authorized_parties="https://app.myhomecloud.dev")
+    _enable_clerk(monkeypatch, keypair, authorized_parties="https://app.homecloud.dev")
     priv, _ = keypair
     with pytest.raises(jwt.InvalidTokenError):
         get_clerk_auth().verify_token(_token(priv, azp="https://attacker.example"))
 
 
 def test_verify_token_authorized_azp_accepted(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair, authorized_parties="https://app.myhomecloud.dev")
+    _enable_clerk(monkeypatch, keypair, authorized_parties="https://app.homecloud.dev")
     priv, _ = keypair
-    claims = get_clerk_auth().verify_token(_token(priv, azp="https://app.myhomecloud.dev"))
+    claims = get_clerk_auth().verify_token(_token(priv, azp="https://app.homecloud.dev"))
     assert claims["sub"] == "user_123"
 
 
@@ -162,11 +162,11 @@ def test_auth_verify_redirects_to_console(monkeypatch, keypair):
     _enable_clerk(monkeypatch, keypair)
     import homecloud.api.routes as routes_module
 
-    monkeypatch.setattr(routes_module.settings, "console_url", "https://app.myhomecloud.dev")
+    monkeypatch.setattr(routes_module.settings, "console_url", "https://app.homecloud.dev")
     client = TestClient(app)
     resp = client.get("/auth/verify", follow_redirects=False)
     assert resp.status_code == 302
-    assert resp.headers["location"].startswith("https://app.myhomecloud.dev")
+    assert resp.headers["location"].startswith("https://app.homecloud.dev")
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ def test_caddy_site_includes_forward_auth_when_configured(tmp_path, monkeypatch)
     import homecloud.proxy.caddy as caddy_module
 
     monkeypatch.setattr(caddy_module.settings, "caddy_config_dir", str(tmp_path))
-    monkeypatch.setattr(caddy_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(caddy_module.settings, "domain", "homecloud.dev")
     monkeypatch.setattr(caddy_module.settings, "caddy_reload_cmd", "")
     monkeypatch.setattr(caddy_module.settings, "caddy_forward_auth_upstream", "controller:8080")
 
@@ -195,7 +195,7 @@ def test_caddy_site_no_forward_auth_when_unset(tmp_path, monkeypatch):
     import homecloud.proxy.caddy as caddy_module
 
     monkeypatch.setattr(caddy_module.settings, "caddy_config_dir", str(tmp_path))
-    monkeypatch.setattr(caddy_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(caddy_module.settings, "domain", "homecloud.dev")
     monkeypatch.setattr(caddy_module.settings, "caddy_reload_cmd", "")
     monkeypatch.setattr(caddy_module.settings, "caddy_forward_auth_upstream", "")
 

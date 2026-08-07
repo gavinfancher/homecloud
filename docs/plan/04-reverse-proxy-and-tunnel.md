@@ -61,7 +61,7 @@ import /etc/caddy/sites/*.caddy
 ```
 
 Cloudflare Tunnel ingress (configured in the Cloudflare dashboard for the named tunnel):
-`*.myhomecloud.dev` and `myhomecloud.dev` → `http://caddy:80`. (The tunnel runs in the same
+`*.homecloud.dev` and `homecloud.dev` → `http://caddy:80`. (The tunnel runs in the same
 compose network as caddy; service name `caddy` resolves.)
 
 **Reload approach:** prefer Caddy's admin API or `caddy reload`. Since the controller is a
@@ -78,7 +78,7 @@ Simplest robust option: have the controller POST to the Caddy admin API
    is empty.
 2. Each `*.caddy` file should serve the public host and proxy to the instance tailnet IP:port:
    ```
-   grafana.app.myhomecloud.dev {
+   grafana.app.homecloud.dev {
        reverse_proxy 100.x.x.x:3000
    }
    ```
@@ -96,7 +96,7 @@ Simplest robust option: have the controller POST to the Caddy admin API
 - `docker compose up -d` on the control node starts controller + caddy + cloudflared.
 - `publish_web(...)` writes a `*.caddy` file, reloads Caddy, creates the Cloudflare record, and
   records state; `unpublish_web(...)` reverses all three.
-- Visiting `https://<service>.<instance>.myhomecloud.dev` from off-tailnet reaches the
+- Visiting `https://<service>.<instance>.homecloud.dev` from off-tailnet reaches the
   instance's service.
 - Reload/DNS calls no-op cleanly when their creds/paths are unset.
 - `uv run ruff check src/` passes.

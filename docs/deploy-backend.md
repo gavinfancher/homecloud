@@ -5,8 +5,8 @@ Proxmox host itself). The SPA is deployed separately via Cloudflare — see
 [deploy-frontend.md](./deploy-frontend.md).
 
 ```
-app.myhomecloud.dev  → Cloudflare Workers (frontend, auto on push)
-api.myhomecloud.dev  → Tunnel → Caddy → controller:8080 (this stack)
+app.homecloud.dev  → Cloudflare Workers (frontend, auto on push)
+api.homecloud.dev  → Tunnel → Caddy → controller:8080 (this stack)
 ```
 
 ## Architecture
@@ -14,9 +14,9 @@ api.myhomecloud.dev  → Tunnel → Caddy → controller:8080 (this stack)
 | Service | Role |
 |---------|------|
 | `controller` | FastAPI — Proxmox API, jobs, DNS/proxy sync |
-| `caddy` | Reverse proxy for published instance services + `api.myhomecloud.dev` |
+| `caddy` | Reverse proxy for published instance services + `api.homecloud.dev` |
 | `cloudflared` | Cloudflare Tunnel connector |
-| `coredns` | Split DNS for `*.myhomecloud.dev` on the tailnet |
+| `coredns` | Split DNS for `*.homecloud.dev` on the tailnet |
 
 **Your setup:** Proxmox host `pve-root` (100.106.79.65), control node VM `homecloud`
 (100.76.205.59).
@@ -110,7 +110,7 @@ PROXMOX_SSH_HOST=pve
 # ... token, storage, template id ...
 
 # Public edge
-DOMAIN=myhomecloud.dev
+DOMAIN=homecloud.dev
 CLOUDFLARE_API_TOKEN=...
 CLOUDFLARE_ZONE_ID=...
 CLOUDFLARE_TUNNEL_TOKEN=...
@@ -124,11 +124,11 @@ CONTROL_NODE_TAILSCALE_IP=100.76.205.59
 # Clerk (required for production auth)
 CLERK_JWKS_URL=https://<slug>.clerk.accounts.dev/.well-known/jwks.json
 CLERK_ISSUER=https://<slug>.clerk.accounts.dev
-CLERK_AUTHORIZED_PARTIES=https://app.myhomecloud.dev
+CLERK_AUTHORIZED_PARTIES=https://app.homecloud.dev
 CLERK_PUBLISHABLE_KEY=pk_...
-FRONTEND_ORIGIN=https://app.myhomecloud.dev
-CONSOLE_URL=https://app.myhomecloud.dev
-API_PUBLIC_HOST=api.myhomecloud.dev
+FRONTEND_ORIGIN=https://app.homecloud.dev
+CONSOLE_URL=https://app.homecloud.dev
+API_PUBLIC_HOST=api.homecloud.dev
 OWNER_USERNAME=gavin
 ```
 
@@ -164,12 +164,12 @@ CONTROL_NODE_HOST=100.76.205.59 make deploy-remote
 
 ```bash
 curl -fsS http://localhost:8080/api/health
-curl -fsS https://api.myhomecloud.dev/api/health
-curl -fsS https://api.myhomecloud.dev/api/config   # auth_enabled: true when Clerk is set
+curl -fsS https://api.homecloud.dev/api/health
+curl -fsS https://api.homecloud.dev/api/config   # auth_enabled: true when Clerk is set
 docker compose -f infra/docker/docker-compose.yml ps   # controller, caddy, cloudflared, coredns all Up
 ```
 
-Open `https://app.myhomecloud.dev` — Clerk sign-in, API calls to `api.myhomecloud.dev`.
+Open `https://app.homecloud.dev` — Clerk sign-in, API calls to `api.homecloud.dev`.
 
 ## Troubleshooting
 
@@ -193,8 +193,8 @@ sudo killall -HUP mDNSResponder
 Then verify:
 
 ```bash
-dig @100.76.205.59 wishly.gavin.myhomecloud.dev +short   # tailnet IP from CoreDNS
-dscacheutil -q host -a name wishly.gavin.myhomecloud.dev  # what SSH uses
+dig @100.76.205.59 wishly.gavin.homecloud.dev +short   # tailnet IP from CoreDNS
+dscacheutil -q host -a name wishly.gavin.homecloud.dev  # what SSH uses
 ```
 
 Restarting the Tailscale app also clears macOS cache — that's why it seemed to help, but
@@ -202,15 +202,15 @@ it's heavier than a cache flush.
 
 ### Split DNS breaks `api` / `app` hostnames
 
-If Tailscale split DNS sends all of `myhomecloud.dev` to CoreDNS, instance names resolve
-privately but `api.myhomecloud.dev` and `app.myhomecloud.dev` must still reach Cloudflare.
+If Tailscale split DNS sends all of `homecloud.dev` to CoreDNS, instance names resolve
+privately but `api.homecloud.dev` and `app.homecloud.dev` must still reach Cloudflare.
 The Corefile uses **fallthrough** so unknown names forward to public resolvers (1.1.1.1).
 
 Verify on the tailnet:
 
 ```bash
-dig @100.76.205.59 api.myhomecloud.dev    # should return Cloudflare IPs, not NXDOMAIN
-dig @100.76.205.59 dagster.gavin.myhomecloud.dev  # instance tailnet IP
+dig @100.76.205.59 api.homecloud.dev    # should return Cloudflare IPs, not NXDOMAIN
+dig @100.76.205.59 dagster.gavin.homecloud.dev  # instance tailnet IP
 ```
 
 ### CoreDNS won't start (port 53)

@@ -208,8 +208,8 @@ def isolated_api(tmp_path, monkeypatch):
 
     monkeypatch.setattr(caddy_module.settings, "caddy_config_dir", str(caddy_dir))
     monkeypatch.setattr(caddy_module.settings, "caddy_reload_cmd", "")
-    monkeypatch.setattr(caddy_module.settings, "domain", "myhomecloud.dev")
-    monkeypatch.setattr(publish_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(caddy_module.settings, "domain", "homecloud.dev")
+    monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
     monkeypatch.setattr(state_module, "STATE_FILE", state_file)
 
     # Disable Cloudflare DNS
@@ -220,7 +220,7 @@ def isolated_api(tmp_path, monkeypatch):
             self.token = ""
             self.zone_id = ""
             self.tunnel_cname = ""
-            self.domain = "myhomecloud.dev"
+            self.domain = "homecloud.dev"
 
     monkeypatch.setattr("homecloud.publish.CloudflareDNS", lambda: _DisabledDNS())
 
@@ -334,7 +334,7 @@ def test_publish_service_seen_port_succeeds(isolated_api):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["hostname"] == "grafana.app.myhomecloud.dev"
+    assert data["hostname"] == "grafana.app.homecloud.dev"
 
 
 def test_publish_service_persists_state(isolated_api):

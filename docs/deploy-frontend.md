@@ -3,8 +3,8 @@
 The SPA in `frontend/` is deployed as **static assets on a Cloudflare Worker**
 (Git-connected: build → `wrangler deploy`). You do not need a separate Worker script.
 
-Production URL: `https://app.myhomecloud.dev`  
-API URL (separate stack): `https://api.myhomecloud.dev`
+Production URL: `https://app.homecloud.dev`  
+API URL (separate stack): `https://api.homecloud.dev`
 
 ## One-time: connect GitHub → Workers & Pages
 
@@ -49,13 +49,13 @@ Set these for **Production** (and Preview if you want Clerk on preview deploys):
 | Variable | Value | Notes |
 |---|---|---|
 | `VITE_CLERK_PUBLISHABLE_KEY` | `pk_live_…` or `pk_test_…` | From Clerk Dashboard or `clerk env pull` |
-| `VITE_API_BASE` | `https://api.myhomecloud.dev` | Also in `frontend/.env.production` (checked in) |
+| `VITE_API_BASE` | `https://api.homecloud.dev` | Also in `frontend/.env.production` (checked in) |
 
 **Do not** set `VITE_DEV_BYPASS_AUTH` in Production. It is only for local `vite dev` and is ignored in prod builds anyway (`import.meta.env.DEV` is false).
 
 ### Custom domain
 
-Pages → **Custom domains** → add `app.myhomecloud.dev` (likely already attached if the site is live).
+Pages → **Custom domains** → add `app.homecloud.dev` (likely already attached if the site is live).
 
 ## Backend alignment (control node `.env`)
 
@@ -64,11 +64,11 @@ When Clerk is enabled on the controller, set:
 ```bash
 CLERK_JWKS_URL=https://<slug>.clerk.accounts.dev/.well-known/jwks.json
 CLERK_ISSUER=https://<slug>.clerk.accounts.dev
-CLERK_AUTHORIZED_PARTIES=https://app.myhomecloud.dev
+CLERK_AUTHORIZED_PARTIES=https://app.homecloud.dev
 CLERK_PUBLISHABLE_KEY=pk_…
-FRONTEND_ORIGIN=https://app.myhomecloud.dev
-CONSOLE_URL=https://app.myhomecloud.dev
-API_PUBLIC_HOST=api.myhomecloud.dev
+FRONTEND_ORIGIN=https://app.homecloud.dev
+CONSOLE_URL=https://app.homecloud.dev
+API_PUBLIC_HOST=api.homecloud.dev
 OWNER_USERNAME=gavin
 ```
 
@@ -141,8 +141,8 @@ Add `VITE_CLERK_PUBLISHABLE_KEY` under Pages → **Environment variables** (Prod
 After pushing to `main`:
 
 1. Cloudflare Pages → **Deployments** — build should succeed.
-2. Open `https://app.myhomecloud.dev` — sign-in screen (Clerk), not the dev bypass badge.
-3. Browser devtools → Network — API calls go to `https://api.myhomecloud.dev/api/…`.
+2. Open `https://app.homecloud.dev` — sign-in screen (Clerk), not the dev bypass badge.
+3. Browser devtools → Network — API calls go to `https://api.homecloud.dev/api/…`.
 
 ## Local dev (unchanged)
 

@@ -33,8 +33,8 @@ CONTROL_IP = "100.64.0.1"
 
 
 def test_render_zone_contains_origin():
-    zone = render_zone(SAMPLE_INSTANCES, CONTROL_IP, serial=1, domain="myhomecloud.dev")
-    assert "$ORIGIN myhomecloud.dev." in zone
+    zone = render_zone(SAMPLE_INSTANCES, CONTROL_IP, serial=1, domain="homecloud.dev")
+    assert "$ORIGIN homecloud.dev." in zone
 
 
 def test_render_zone_contains_ttl():
@@ -51,7 +51,7 @@ def test_render_zone_contains_soa():
 def test_render_zone_contains_ns():
     zone = render_zone(SAMPLE_INSTANCES, CONTROL_IP, serial=1)
     assert "IN NS" in zone
-    assert "ns.vm.mycloud.gavinf.com." in zone
+    assert "ns.vm.homecloud.gavinf.com." in zone
 
 
 def test_render_zone_contains_ns_a_record():
@@ -163,7 +163,7 @@ def test_render_zone_consecutive_defaults_are_monotonic():
 
 def test_write_zone_noop_when_dir_absent(tmp_path, monkeypatch):
     """write_zone must not crash when the zone directory does not exist."""
-    nonexistent = tmp_path / "does_not_exist" / "db.myhomecloud.dev"
+    nonexistent = tmp_path / "does_not_exist" / "db.homecloud.dev"
     monkeypatch.setattr(zone_module.settings, "coredns_zone_path", str(nonexistent))
     monkeypatch.setattr(zone_module.settings, "control_node_tailscale_ip", CONTROL_IP)
     monkeypatch.setattr(zone_module.settings, "coredns_reload_cmd", "")
@@ -195,11 +195,11 @@ def test_write_zone_logs_warning_when_dir_absent(tmp_path, monkeypatch, caplog):
 
 def test_write_zone_creates_file(tmp_path, monkeypatch):
     """write_zone must write the zone file when the directory exists."""
-    zone_file = tmp_path / "db.myhomecloud.dev"
+    zone_file = tmp_path / "db.homecloud.dev"
     monkeypatch.setattr(zone_module.settings, "coredns_zone_path", str(zone_file))
     monkeypatch.setattr(zone_module.settings, "control_node_tailscale_ip", CONTROL_IP)
     monkeypatch.setattr(zone_module.settings, "coredns_reload_cmd", "")
-    monkeypatch.setattr(zone_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(zone_module.settings, "domain", "homecloud.dev")
 
     # Inject state so write_zone has something to render.
     monkeypatch.setattr(
@@ -212,7 +212,7 @@ def test_write_zone_creates_file(tmp_path, monkeypatch):
 
     assert zone_file.exists()
     content = zone_file.read_text()
-    assert "$ORIGIN myhomecloud.dev." in content
+    assert "$ORIGIN homecloud.dev." in content
     assert "100.10.0.1" in content
     assert "*.app" in content
 
@@ -225,7 +225,7 @@ def test_write_zone_content_matches_render(tmp_path, monkeypatch):
     monkeypatch.setattr(zone_module.settings, "coredns_zone_path", str(zone_file))
     monkeypatch.setattr(zone_module.settings, "control_node_tailscale_ip", CONTROL_IP)
     monkeypatch.setattr(zone_module.settings, "coredns_reload_cmd", "")
-    monkeypatch.setattr(zone_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(zone_module.settings, "domain", "homecloud.dev")
     monkeypatch.setattr(zone_module, "list_registered_vms", lambda: instances)
 
     write_zone()

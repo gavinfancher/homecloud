@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     )
 
     # Public domain
-    domain: str = "vm.mycloud.gavinf.com"
+    domain: str = "vm.homecloud.gavinf.com"
 
     # Cloudflare
     cloudflare_api_token: str = ""
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     caddy_reload_cmd: str = ""
 
     # Local resolver (split DNS)
-    coredns_zone_path: str = "/etc/coredns/db.vm.mycloud.gavinf.com"
+    coredns_zone_path: str = "/etc/coredns/db.vm.homecloud.gavinf.com"
     coredns_reload_cmd: str = ""
     control_node_tailscale_ip: str = ""
 
@@ -67,13 +67,13 @@ class Settings(BaseSettings):
     # work without infra. In production set both → fail-closed.
     clerk_jwks_url: str = ""           # https://<slug>.clerk.accounts.dev/.well-known/jwks.json
     clerk_issuer: str = ""            # https://<slug>.clerk.accounts.dev
-    clerk_authorized_parties: str = ""  # comma-separated allowed azp (e.g. https://app.myhomecloud.dev)
+    clerk_authorized_parties: str = ""  # comma-separated allowed azp (e.g. https://app.homecloud.dev)
     clerk_publishable_key: str = ""   # public; surfaced to the SPA via GET /api/config
 
     # Frontend / API exposure (phases 09–11)
     frontend_origin: str = ""          # comma-separated CORS origins for the Pages SPA
-    api_public_host: str = ""          # e.g. api.myhomecloud.dev (tunnel/Caddy route)
-    console_url: str = ""              # e.g. https://app.myhomecloud.dev — login redirect target
+    api_public_host: str = ""          # e.g. api.homecloud.dev (tunnel/Caddy route)
+    console_url: str = ""              # e.g. https://app.homecloud.dev — login redirect target
 
     # Caddy forward-auth (phase 11). When set, every published site is gated by
     # a forward_auth to this upstream's /auth/verify. Empty → no auth block.

@@ -17,7 +17,7 @@ def private_fqdn(name: str) -> str:
     """Friendly private hostname on the split-DNS zone (CoreDNS).
 
     With ``OWNER_USERNAME`` set: ``<instance>.<username>.<domain>``
-    (e.g. ``dagster.gavin.myhomecloud.dev``).  Without it: ``<instance>.<domain>``.
+    (e.g. ``dagster.gavin.homecloud.dev``).  Without it: ``<instance>.<domain>``.
     """
     instance = short_name(name)
     if settings.owner_username:

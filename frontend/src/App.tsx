@@ -46,7 +46,7 @@ export default function App() {
   return (
     <ToastProvider>
       <Show when="signed-out">
-        <RedirectToSignIn redirectUrl="https://mycloud.gavinf.com" />
+        <RedirectToSignIn redirectUrl="https://homecloud.gavinf.com" />
       </Show>
       <Show when="signed-in">
         <ClerkStoreProvider>
@@ -88,7 +88,7 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
       <aside className="sidebar">
         <NavLink to="/overview" className="sidebar-brand" title="Overview">
           <IconCloud width={22} height={22} />
-          <span>mycloud</span>
+          <span>homecloud</span>
         </NavLink>
         <nav className="sidebar-nav">
           {NAV.map((n) => (

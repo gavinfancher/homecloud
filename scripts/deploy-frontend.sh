@@ -23,4 +23,4 @@ PROJECT="${WORKER_NAME:-homecloud}"
 echo "→ Deploying dist/ to Cloudflare Worker '${PROJECT}' (wrangler deploy)…"
 npx wrangler deploy
 
-echo "✓ Frontend deployed. Console: https://app.myhomecloud.dev (if DNS is wired)"
+echo "✓ Frontend deployed. Console: https://app.homecloud.dev (if DNS is wired)"

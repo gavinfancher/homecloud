@@ -44,7 +44,7 @@ jobs:
 
       - name: Build
         env:
-          VITE_API_BASE: https://api.myhomecloud.dev
+          VITE_API_BASE: https://api.homecloud.dev
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: npm run build
 

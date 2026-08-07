@@ -3,7 +3,7 @@
 ## Objective
 
 Detect which TCP ports an instance is listening on, show them in the UI, and let the user
-publish a chosen port as `<service>.<instance>.myhomecloud.dev` (web) with one action.
+publish a chosen port as `<service>.<instance>.homecloud.dev` (web) with one action.
 
 ## Context
 
@@ -41,7 +41,7 @@ Add `src/homecloud/ports.py` with a `scan_ports(instance) -> list[dict]`:
 
 ### Primary web host
 
-When an instance is created, optionally publish its base host `app.myhomecloud.dev` →
+When an instance is created, optionally publish its base host `app.homecloud.dev` →
 `tailnet_ip:default_web_port` if a web port is detected. Make this opt-in (a checkbox in the UI;
 default off) to avoid publishing things by accident.
 
@@ -50,7 +50,7 @@ default off) to avoid publishing things by accident.
 - `POST /api/vms/{name}/scan-ports` returns a job; after it completes, `GET .../ports` lists the
   instance's listening TCP ports with process names where available.
 - `POST /api/vms/{name}/services {service:"grafana", port:3000, public:true}` makes
-  `https://grafana.app.myhomecloud.dev` reach the service, and records it in `web[]`.
+  `https://grafana.app.homecloud.dev` reach the service, and records it in `web[]`.
 - Deleting the service removes the Caddy route, the Cloudflare record, and the state entry.
 - Loopback-only ports are clearly flagged as not publishable as-is.
 - `uv run pytest -q` and `uv run ruff check src/` pass.

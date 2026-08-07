@@ -12,36 +12,36 @@ INSTANCES = {"dagster": {"tailscale_ip": "100.1.1.1"}}
 
 def test_private_fqdn_flat_without_username(monkeypatch):
     monkeypatch.setattr(publish_module.settings, "owner_username", "")
-    monkeypatch.setattr(publish_module.settings, "domain", "myhomecloud.dev")
-    assert private_fqdn("dagster") == "dagster.myhomecloud.dev"
+    monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
+    assert private_fqdn("dagster") == "dagster.homecloud.dev"
 
 
 def test_private_fqdn_namespaced_with_username(monkeypatch):
     monkeypatch.setattr(publish_module.settings, "owner_username", "gavin")
-    monkeypatch.setattr(publish_module.settings, "domain", "myhomecloud.dev")
-    assert private_fqdn("dagster") == "dagster.gavin.myhomecloud.dev"
+    monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
+    assert private_fqdn("dagster") == "dagster.gavin.homecloud.dev"
 
 
 def test_connection_info_exposes_private_and_magic(monkeypatch):
     monkeypatch.setattr(publish_module.settings, "owner_username", "gavin")
-    monkeypatch.setattr(publish_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
     monkeypatch.setattr(publish_module.settings, "vm_ssh_user", "ubuntu")
     monkeypatch.setattr(
         "homecloud.dns.names.TailscaleClient.fqdn",
         lambda _name: "dagster.tailnet.ts.net",
     )
     info = connection_info("dagster", "100.1.1.1")
-    assert info["hostname"] == "dagster.gavin.myhomecloud.dev"
-    assert info["private_host"] == "dagster.gavin.myhomecloud.dev"
+    assert info["hostname"] == "dagster.gavin.homecloud.dev"
+    assert info["private_host"] == "dagster.gavin.homecloud.dev"
     assert info["magic_dns"] == "dagster.tailnet.ts.net"
-    assert info["ssh"] == "ssh ubuntu@dagster.gavin.myhomecloud.dev"
+    assert info["ssh"] == "ssh ubuntu@dagster.gavin.homecloud.dev"
 
 
 def test_ssh_command_uses_private_host(monkeypatch):
     monkeypatch.setattr(publish_module.settings, "owner_username", "gavin")
-    monkeypatch.setattr(publish_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
     monkeypatch.setattr(publish_module.settings, "vm_ssh_user", "ubuntu")
-    assert ssh_command("dagster") == "ssh ubuntu@dagster.gavin.myhomecloud.dev"
+    assert ssh_command("dagster") == "ssh ubuntu@dagster.gavin.homecloud.dev"
 
 
 def test_host_label_flat_without_username(monkeypatch):

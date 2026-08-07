@@ -1,6 +1,6 @@
 """CoreDNS zone-file generation for private split DNS (Phase 06).
 
-render_zone() produces a valid RFC 1035 zone file for the myhomecloud.dev zone,
+render_zone() produces a valid RFC 1035 zone file for the homecloud.dev zone,
 assigning each registered instance its tailnet IP.  write_zone() reads state and
 writes the file to the configured path, then optionally runs a reload command.
 
@@ -47,7 +47,7 @@ def render_zone(
         Zone serial number.  Defaults to the current unix timestamp (monotonic
         across calls).  Pass an explicit value for deterministic tests.
     domain:
-        Zone origin.  Defaults to ``settings.domain`` (``myhomecloud.dev``).
+        Zone origin.  Defaults to ``settings.domain`` (``homecloud.dev``).
     """
     _domain = domain or settings.domain
     _serial = serial if serial is not None else _default_serial()

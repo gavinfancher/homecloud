@@ -2,7 +2,7 @@
 
 ## Objective
 
-Programmatically manage `myhomecloud.dev` DNS records so that publishing an instance or a
+Programmatically manage `homecloud.dev` DNS records so that publishing an instance or a
 service creates the right public hostname pointing at the Cloudflare Tunnel.
 
 ## Context
@@ -21,18 +21,18 @@ service creates the right public hostname pointing at the Cloudflare Tunnel.
 2. **Rewrite** `src/homecloud/cloudflare/dns.py`:
    - `enabled` property = all of token/zone/tunnel set.
    - `ensure_record(host_label: str) -> dict`: create/update proxied CNAME for
-     `<host_label>.myhomecloud.dev` → tunnel; idempotent (lookup by name first); returns
+     `<host_label>.homecloud.dev` → tunnel; idempotent (lookup by name first); returns
      `{hostname, record_id, content}`. When `not enabled`, log a warning and return
      `{"skipped": True, "hostname": ...}` (no crash).
    - `delete_record(host_label: str)`: remove matching records; no-op when disabled.
-   - `host_label` is the part before `.myhomecloud.dev` and may contain dots
+   - `host_label` is the part before `.homecloud.dev` and may contain dots
      (`grafana.app`). Handle FQDN-or-label inputs.
 3. **Tooling helper**: a thin module function or method the proxy/port phases call, e.g.
    `publish_dns(hostname)` / `unpublish_dns(hostname)`.
 
 ## Manual infra prerequisites (document in the phase output, do not automate here)
 
-- Create a Cloudflare API token scoped to **Zone:DNS:Edit** for `myhomecloud.dev`.
+- Create a Cloudflare API token scoped to **Zone:DNS:Edit** for `homecloud.dev`.
 - Create a **named Cloudflare Tunnel** (Phase 04 runs the connector); note its UUID; the CNAME
   target is `<uuid>.cfargotunnel.com`.
 - Put `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_TUNNEL_CNAME` in `.env`.
@@ -40,8 +40,8 @@ service creates the right public hostname pointing at the Cloudflare Tunnel.
 ## Acceptance criteria
 
 - With creds set, calling `ensure_record("app")` creates a proxied CNAME
-  `app.myhomecloud.dev → <uuid>.cfargotunnel.com` and is idempotent on repeat.
-- `ensure_record("grafana.app")` creates `grafana.app.myhomecloud.dev` similarly.
+  `app.homecloud.dev → <uuid>.cfargotunnel.com` and is idempotent on repeat.
+- `ensure_record("grafana.app")` creates `grafana.app.homecloud.dev` similarly.
 - `delete_record(...)` removes them.
 - With creds **unset**, both functions no-op and log, and the app still runs.
 - `uv run ruff check src/` passes.

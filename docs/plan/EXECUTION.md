@@ -57,11 +57,11 @@ blocked without them, but all phases can be *coded and unit-tested* without them
 no-op rule.
 
 - **Cloudflare**
-  - API token with `Zone:DNS:Edit` on `myhomecloud.dev` → `CLOUDFLARE_API_TOKEN`
+  - API token with `Zone:DNS:Edit` on `homecloud.dev` → `CLOUDFLARE_API_TOKEN`
   - Zone ID → `CLOUDFLARE_ZONE_ID`
   - Named Tunnel: create it, note the **UUID** (`CLOUDFLARE_TUNNEL_CNAME=<uuid>.cfargotunnel.com`)
     and the connector token (`CLOUDFLARE_TUNNEL_TOKEN`)
-  - Cloudflare **Access**: self-hosted app on `*.myhomecloud.dev` + a **service token** for
+  - Cloudflare **Access**: self-hosted app on `*.homecloud.dev` + a **service token** for
     machine clients (note for Phase 04/05 health checks)
 - **Tailscale**
   - Control node tailnet IP → `CONTROL_NODE_TAILSCALE_IP` (zone SOA + Caddy upstream base)

@@ -19,14 +19,14 @@ port discovery, and publish/unpublish actions.
 1. **Create form** (`create` view):
    - Add a **size** selector (cards or a `<select>`) from `GET /api/sizes`; choosing a size sets
      the sliders; a **Custom** option re-enables the cores/memory/disk sliders.
-   - Optional checkbox "Publish web (port 80) at `name.myhomecloud.dev`" (default off).
+   - Optional checkbox "Publish web (port 80) at `name.homecloud.dev`" (default off).
    - Live summary should show the resulting public hostname and the private (tailnet) name.
 2. **Instance detail** (`vm-detail` view): add a **Networking** panel with two sections:
    - **Public web services**: table of `web[]` (service, port, `https://<host>`, public toggle,
      delete). A "Publish a port" button opens the port picker.
    - **Private access (Tailscale)**: show the tailnet name and the
      `access_summary`-style note that all TCP ports are reachable at
-     `<instance>.myhomecloud.dev:<port>` on the tailnet; show a copy-able `psql`/`ssh` example.
+     `<instance>.homecloud.dev:<port>` on the tailnet; show a copy-able `psql`/`ssh` example.
 3. **Port discovery**: a "Scan ports" button → calls `scan-ports`, streams the job log, then
    renders `ports_seen` as a table with a **Publish** action per row (prompts for a service
    label and public/private). Loopback-only ports are shown disabled with a tooltip explaining

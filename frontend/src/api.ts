@@ -169,7 +169,7 @@ export function createApi(getToken: TokenGetter) {
       }
       if (e instanceof TypeError) {
         throw new Error(
-          `Network error calling ${API_BASE || 'same-origin'}${path} — API unreachable (check api.myhomecloud.dev / tunnel)`,
+          `Network error calling ${API_BASE || 'same-origin'}${path} — API unreachable (check api.homecloud.dev / tunnel)`,
           { cause: e },
         )
       }

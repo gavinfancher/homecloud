@@ -26,18 +26,18 @@ Phase 01 performs the rename. Later phases assume the new names.
 
 1. **Web UI + API** to create instances from a base image in selectable **sizes**.
 2. **Public web publishing**: creating an instance named `app` makes it reachable at
-   `app.myhomecloud.dev`; individual HTTP services on detected ports are published at
-   `<service>.app.myhomecloud.dev`.
+   `app.homecloud.dev`; individual HTTP services on detected ports are published at
+   `<service>.app.homecloud.dev`.
 3. **Private database / TCP access** over Tailscale, using **split DNS** so the same
-   `myhomecloud.dev` names resolve to private tailnet IPs when you are on the tailnet.
+   `homecloud.dev` names resolve to private tailnet IPs when you are on the tailnet.
 4. **Port discovery** on instances so the UI can offer to publish a listening port.
 5. **SSH key baked into the base image** (done last; partially exists already).
 
 ## Network model (one-paragraph summary)
 
-`myhomecloud.dev` is owned in Cloudflare. **Off the tailnet**, public web hostnames resolve
+`homecloud.dev` is owned in Cloudflare. **Off the tailnet**, public web hostnames resolve
 via Cloudflare → a Cloudflare Tunnel on the control node → Caddy → the instance's tailnet
-IP:port. **On the tailnet**, Tailscale split DNS sends `myhomecloud.dev` lookups to a small
+IP:port. **On the tailnet**, Tailscale split DNS sends `homecloud.dev` lookups to a small
 resolver on the control node, which answers with the instance's **tailnet IP** directly — so
 databases and other TCP services stay private and never get a public record. See
 `00-architecture.md` for the full design.
@@ -81,9 +81,9 @@ disagree while implementing:
    IP + wildcard TLS. Plan assumes Tunnel.
 2. **Resolver** for split DNS: CoreDNS (recommended) vs. dnsmasq/Technitium.
 3. **Per-service wildcard DNS**: Cloudflare does not proxy multi-label wildcards
-   (`*.app.myhomecloud.dev`) on non-Enterprise plans, so we create **explicit records per
+   (`*.app.homecloud.dev`) on non-Enterprise plans, so we create **explicit records per
    published service**. Confirm this is acceptable.
-4. **Auth on public services**: **decided** — the `myhomecloud.dev` zone sits behind
+4. **Auth on public services**: **decided** — the `homecloud.dev` zone sits behind
    **Cloudflare Access**. Published web hostnames are gated at the edge by Access policies, not
    open to the world. Implications:
    - The controller console is reached over the tailnet (`http://<control-node>:8080`) and is
@@ -91,5 +91,5 @@ disagree while implementing:
    - Machine-to-machine access to a published hostname needs an **Access service token** or a
      bypass policy; document per service when needed.
    - Phases 03/04 do not need to implement Access; a wildcard/self-hosted Access app on
-     `*.myhomecloud.dev` covers new hostnames automatically. Optional future work: have the
+     `*.homecloud.dev` covers new hostnames automatically. Optional future work: have the
      controller create per-hostname Access apps/policies via the Cloudflare API.

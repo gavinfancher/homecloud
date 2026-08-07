@@ -34,10 +34,10 @@ def isolated(tmp_path, monkeypatch):
     # Patch caddy settings.
     monkeypatch.setattr(caddy_module.settings, "caddy_config_dir", str(caddy_dir))
     monkeypatch.setattr(caddy_module.settings, "caddy_reload_cmd", "")  # no network
-    monkeypatch.setattr(caddy_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(caddy_module.settings, "domain", "homecloud.dev")
 
     # Patch publish.settings (same object, but module-level access via settings).
-    monkeypatch.setattr(publish_module.settings, "domain", "myhomecloud.dev")
+    monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
 
     # Redirect state file.
     monkeypatch.setattr(state_module, "STATE_FILE", state_file)
@@ -51,7 +51,7 @@ def isolated(tmp_path, monkeypatch):
             self.token = ""
             self.zone_id = ""
             self.tunnel_cname = ""
-            self.domain = "myhomecloud.dev"
+            self.domain = "homecloud.dev"
 
     # publish.py imports CloudflareDNS at module level, so we patch it there.
     monkeypatch.setattr("homecloud.publish.CloudflareDNS", lambda: _DisabledDNS())
@@ -86,7 +86,7 @@ def test_publish_web_caddy_file_contents(isolated):
         "app", "grafana", 3000, upstream_host="100.1.2.3"
     )
     contents = (isolated["caddy_dir"] / "grafana.app.caddy").read_text()
-    assert "http://grafana.app.myhomecloud.dev" in contents
+    assert "http://grafana.app.homecloud.dev" in contents
     assert "reverse_proxy 100.1.2.3:3000" in contents
 
 
@@ -94,7 +94,7 @@ def test_publish_web_returns_dict(isolated):
     result = publish_module.publish_web(
         "myvm", "api", 8080, upstream_host="100.7.7.7"
     )
-    assert result["hostname"] == "api.myvm.myhomecloud.dev"
+    assert result["hostname"] == "api.myvm.homecloud.dev"
     assert "caddy_config" in result
     assert "cloudflare_record_id" in result
 
@@ -114,7 +114,7 @@ def test_publish_web_records_state(isolated):
     entry = web_list[0]
     assert entry["service"] == "grafana"
     assert entry["port"] == 3000
-    assert entry["public_host"] == "grafana.app.myhomecloud.dev"
+    assert entry["public_host"] == "grafana.app.homecloud.dev"
     assert entry["public"] is True
     assert entry["caddy_config"] == "grafana.app.caddy"
 
@@ -140,7 +140,7 @@ def test_publish_web_upserts_existing_service(isolated):
     web_list = state["vms"]["app"]["web"]
     assert len(web_list) == 1, "Duplicate service must not create a second entry"
     assert web_list[0]["port"] == 3001
-    assert web_list[0]["public_host"] == "grafana.app.myhomecloud.dev"
+    assert web_list[0]["public_host"] == "grafana.app.homecloud.dev"
 
 
 def test_publish_web_multiple_services(isolated):
@@ -201,7 +201,7 @@ def test_set_instance_web_service_creates_entry(isolated):
         "myvm",
         service="api",
         port=8080,
-        public_host="api.myvm.myhomecloud.dev",
+        public_host="api.myvm.homecloud.dev",
         public=True,
         cloudflare_record_id="rec123",
         caddy_config="api.myvm.caddy",
@@ -217,7 +217,7 @@ def test_remove_instance_web_service_removes_entry(isolated):
         "myvm",
         service="api",
         port=8080,
-        public_host="api.myvm.myhomecloud.dev",
+        public_host="api.myvm.homecloud.dev",
         public=True,
         cloudflare_record_id="rec123",
         caddy_config="api.myvm.caddy",

@@ -35,11 +35,11 @@ class CloudflareDNS:
     def _normalize(self, host_label: str) -> tuple[str, str]:
         """Return (label, fqdn) from a bare label, multi-label, or full FQDN.
 
-        Examples (domain = myhomecloud.dev):
-            "app"                      → ("app", "app.myhomecloud.dev")
-            "grafana.app"              → ("grafana.app", "grafana.app.myhomecloud.dev")
-            "app.myhomecloud.dev"      → ("app", "app.myhomecloud.dev")
-            "grafana.app.myhomecloud.dev" → ("grafana.app", "grafana.app.myhomecloud.dev")
+        Examples (domain = homecloud.dev):
+            "app"                      → ("app", "app.homecloud.dev")
+            "grafana.app"              → ("grafana.app", "grafana.app.homecloud.dev")
+            "app.homecloud.dev"      → ("app", "app.homecloud.dev")
+            "grafana.app.homecloud.dev" → ("grafana.app", "grafana.app.homecloud.dev")
         """
         suffix = f".{self.domain}"
         if host_label.endswith(suffix):
@@ -53,7 +53,7 @@ class CloudflareDNS:
 
         Idempotent: looks up existing record by name and PUTs if found, POSTs otherwise.
         host_label may be a bare label ("app"), multi-label ("grafana.app"),
-        or a full FQDN ("app.myhomecloud.dev").
+        or a full FQDN ("app.homecloud.dev").
 
         Returns:
             {"hostname": str, "record_id": str, "content": str}  on success
