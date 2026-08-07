@@ -21,10 +21,10 @@ const SERVICES: Service[] = [
     live: true,
   },
   {
-    id: 'pve',
-    name: 'pve',
+    id: 'proxmox',
+    name: 'proxmox',
     desc: 'Proxmox hypervisor, VMs & cluster management',
-    href: 'https://pve.gavinf.com',
+    href: 'https://proxmox.gavinf.com',
     icon: <IconHypervisor />,
     live: true,
   },
