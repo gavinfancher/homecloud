@@ -1,9 +1,8 @@
 name: Deploy dashboard
 
 on:
-  push:
-    branches: [main]
-    paths: ["dashboard/**"]
+  # Optional backup deploy — primary path is Cloudflare Workers Git (dashboard).
+  # Manual only; does not replace Cloudflare's Git integration.
   workflow_dispatch:
 
 concurrency:
