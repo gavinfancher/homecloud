@@ -13,10 +13,10 @@ type Service = {
 
 const SERVICES: Service[] = [
   {
-    id: 'mycloud',
-    name: 'mycloud',
+    id: 'homecloud',
+    name: 'homecloud',
     desc: 'VM instances, images & self-hosted infrastructure',
-    href: 'https://mycloud.gavinf.com',
+    href: 'https://homecloud.gavinf.com',
     icon: <IconCloud />,
     live: true,
   },
