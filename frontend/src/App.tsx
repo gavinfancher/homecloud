@@ -106,6 +106,9 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
           ))}
         </nav>
         <div className="sidebar-foot">
+          <a className="muted small" href="https://dash.gavinf.com" title="Back to dash.gavinf.com">
+            ← dash
+          </a>
           <div className="tailnet-badge">
             <StatusDot status={dashboard?.tailscale_tailnet ? 'running' : 'stopped'} />
             <span>{dashboard?.tailscale_tailnet || 'no tailnet'}</span>
