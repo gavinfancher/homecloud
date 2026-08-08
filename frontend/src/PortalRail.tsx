@@ -1,7 +1,7 @@
 // Shared portal rail — identical markup/styles live in the dash portal
 // (frontend/dashboard/src/PortalRail.tsx) and the proxmox-frame worker shell.
 // Keep the three in sync when changing anything here.
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 type Site = 'dashboard' | 'homecloud' | 'proxmox'
 
@@ -40,6 +40,11 @@ export function PortalRail({ active, foot }: { active: Site; foot?: ReactNode })
       localStorage.setItem(OPEN_KEY, o ? '0' : '1')
       return !o
     })
+
+  useEffect(() => {
+    document.body.classList.toggle('rail-open', open)
+    return () => document.body.classList.remove('rail-open')
+  }, [open])
 
   return (
     <nav className={`portal-rail ${open ? 'open' : ''}`}>

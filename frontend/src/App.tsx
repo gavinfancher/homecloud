@@ -1,4 +1,4 @@
-import { RedirectToSignIn, Show, UserButton, useAuth } from '@clerk/react'
+import { RedirectToSignIn, Show, useAuth } from '@clerk/react'
 import { useCallback, type ReactNode } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
@@ -85,7 +85,7 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
 
   return (
     <div className="shell">
-      <PortalRail active="homecloud" foot={devBypass ? undefined : <UserButton />} />
+      <PortalRail active="homecloud" />
       <aside className="sidebar">
         <NavLink to="/overview" className="sidebar-brand" title="Overview">
           <span>homecloud</span>

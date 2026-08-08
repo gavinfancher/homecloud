@@ -400,3 +400,11 @@ body {
   width: 100%;
   text-align: left;
 }
+
+.dash-shell {
+  transition: margin-left 0.16s ease;
+}
+
+body.rail-open .dash-shell {
+  margin-left: 220px;
+}

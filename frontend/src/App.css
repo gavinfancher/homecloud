@@ -1724,3 +1724,11 @@ textarea {
   width: 100%;
   text-align: left;
 }
+
+.shell {
+  transition: margin-left 0.16s ease;
+}
+
+body.rail-open .shell {
+  margin-left: 220px;
+}
