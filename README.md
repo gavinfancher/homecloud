@@ -1,92 +1,151 @@
 # homecloud
 
-Spin up Proxmox instances from a Docker-hosted control plane. Instances join your Tailscale tailnet and are reachable via MagicDNS from anywhere.
+A self-hosted mini-cloud: a control plane that provisions VMs on a Proxmox
+hypervisor with one API call, joins them to a private WireGuard mesh
+(Tailscale), and optionally publishes their web services to the internet
+through a Cloudflare Tunnel — with SSO in front of everything.
 
-Deploy tests: backend pushes sync via self-hosted runner; frontend pushes deploy via Cloudflare Workers Git.
+Think "tiny AWS for a homelab": instances, images, private DNS, public
+ingress, and a web console, all driven by a single FastAPI service.
+
+```
+                        ┌──────────────── Cloudflare edge ────────────────┐
+   you (anywhere) ──►   │  gavinf-prod Worker          Tunnel (cloudflared)│
+                        │  ├─ dash / auth (portal SPA)   │                 │
+                        │  ├─ homecloud (console SPA)    ▼                 │
+                        │  └─ proxmox (shell+passthru) Caddy ── controller │
+                        └──────────────────────────────│──────────────────┘
+                                                       │ control node VM
+   you (on tailnet) ──► CoreDNS (split DNS) ───────────┤  docker compose:
+        *.vm.homecloud.gavinf.com → tailnet IPs        │  controller · caddy
+                                                       │  cloudflared · coredns
+                                                       ▼
+                                             Proxmox API + SSH
+                                             (cloud-init, VM lifecycle)
+                                                       │
+                                          instances join the tailnet
+```
+
+## What it does
+
+- **Instance lifecycle** — create / start / stop / suspend / resume / delete
+  Proxmox VMs through a REST API, with async jobs and streamed provisioning
+  logs (`POST /api/vms` returns a `job_id`; poll `/api/jobs/{id}`).
+- **Image pipeline** — builds a cloud-init base template on Proxmox and clones
+  instances from it; per-app deploy specs are Jinja2 cloud-init templates.
+- **Zero-config networking** — every instance auto-joins the Tailscale
+  tailnet; SSH works from anywhere via MagicDNS with no port forwarding.
+- **Private DNS** — the controller renders an RFC 1035 zone file and serves
+  `*.vm.homecloud.gavinf.com` → tailnet IPs via CoreDNS + Tailscale split DNS.
+- **Public ingress on demand** — "publish" an instance port and the controller
+  writes a Caddy site, creates the Cloudflare DNS record pointing at the
+  tunnel, and reloads the proxy. Published apps sit behind Clerk forward-auth.
+- **Port discovery** — scans an instance for listening services so the console
+  can offer one-click publishing.
+- **Auth everywhere** — Clerk JWTs on the API (issuer/JWKS/azp verified),
+  Clerk session gate on published apps via Caddy `forward_auth`, fail-closed
+  in production and fail-open (loudly) for local dev.
+- **Web console** — React SPA for instances, images, jobs, and activity, plus
+  a portal/dashboard and a unified navigation rail shared across sites
+  (including a wrapped Proxmox UI).
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| Control plane | Python 3.12, FastAPI, Pydantic Settings, uv |
+| Virtualization | Proxmox VE (API + SSH cloud-init snippets) |
+| Networking | Tailscale (WireGuard mesh, MagicDNS, split DNS), CoreDNS |
+| Ingress | Cloudflare Tunnel, Caddy, Cloudflare DNS API |
+| Auth | Clerk (JWT verification, forward-auth SSO cookie) |
+| Web | React + TypeScript + Vite, single Cloudflare Worker serving all sites |
+| Runtime | Docker Compose on a control-node VM |
+| CI/CD | GitHub Actions (tests + self-hosted-runner backend deploy), Cloudflare Workers Git (web) |
+| Tests | pytest — 185 tests across auth, DNS, proxy, ports, lifecycle |
 
 ## Repo layout
 
 ```
-src/homecloud/     # Controller (FastAPI)
-frontend/          # Console SPA (homecloud.gavinf.com)
-  dashboard/       # Portal SPA (gavinf.com / auth / dash)
-  gavinf-prod/     # Single Cloudflare Worker serving both SPAs + proxmox shell
+src/homecloud/       Controller (FastAPI)
+  api/               REST routes + schemas
+  proxmox/           Proxmox API client (VM lifecycle, cloud-init)
+  images/            Base-template builder, cloud-init specs, app deployer
+  tailscale/         Tailscale API client + SSH config helpers
+  cloudflare/        Idempotent DNS records → tunnel
+  dns/               Zone rendering for CoreDNS (private split DNS)
+  proxy/             Caddy site management + reload
+  ports.py           Service discovery on instances
+  publish.py         Publish flow (Caddy + DNS + state)
+  auth.py            Clerk JWT verification / forward-auth target
+  jobs.py, state.py  Async job runner, persistent state
+frontend/            Console SPA (homecloud.gavinf.com)
+  dashboard/         Portal SPA (gavinf.com / auth / dash)
+  gavinf-prod/       Single Cloudflare Worker: hostname-routes both SPAs
+                     + the Proxmox shell (see docs/deploy-web.md)
 infra/
-  docker/          # Dockerfile, compose stack
-  caddy/           # Caddy base config
-  coredns/         # CoreDNS Corefile
-scripts/           # Deploy + bootstrap helpers
-tests/             # Pytest suite
-docs/              # Deploy runbooks + archived implementation plan
+  docker/            Dockerfile + compose stack (controller, caddy,
+                     cloudflared, coredns)
+  caddy/, coredns/   Base proxy config, split-DNS Corefile
+scripts/             Bootstrap + deploy helpers for the control node
+tests/               Pytest suite
+docs/                Deploy runbooks + archived design/implementation plan
 ```
 
-## Run (Docker)
+## Run it
 
-On your control node VM:
+On the control node (or any Docker host that can reach Proxmox):
 
 ```bash
-cp .env.example .env   # PROXMOX_HOST, Tailscale keys, etc.
+cp .env.example .env        # Proxmox host/token, Tailscale keys, Clerk, domain
 docker compose -f infra/docker/docker-compose.yml up -d --build
-# or: make deploy-stack
+curl localhost:8080/api/health
 ```
 
-Open `http://<control-node-tailscale-ip>:8080/`
+Local development:
 
-The container needs:
-- Network access to Proxmox API (`PROXMOX_HOST`)
-- SSH to Proxmox for cloud-init snippets (`PROXMOX_SSH_HOST=pve` — mount keys at `./ssh`)
-- Writable volume for state (`.homecloud/`)
+```bash
+make install    # editable Python install + npm install
+make test       # pytest + frontend lint/build
+make dev-api    # uvicorn with reload
+make dev-web    # Vite dev server
+```
 
 ## Create an instance
 
-Set **CPU**, **RAM (GB)**, and **disk (GB)** yourself. RAM: 0.5–64 GB.
-
-```json
-POST /api/vms
-{
-  "name": "dagster",
-  "cores": 1,
-  "memory_gb": 0.5,
-  "disk_gb": 10
-}
+```bash
+curl -X POST https://homecloud-api.gavinf.com/api/vms \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"name": "dagster", "cores": 2, "memory_gb": 4, "disk_gb": 20}'
+# → {"job_id": "..."}   poll /api/jobs/{id} for provisioning logs
 ```
 
-Returns a `job_id` — poll `/api/jobs/{id}` for provisioning logs.
+A few minutes later: `ssh ubuntu@dagster` over the tailnet, private DNS at
+`dagster.vm.homecloud.gavinf.com`, and one API call away from a public URL.
 
-## DNS + SSH
-
-Instance joins Tailscale with hostname `dagster` → MagicDNS: `dagster.kudu-cliff.ts.net` → `ssh ubuntu@dagster.kudu-cliff.ts.net`
-
-No Pi-hole or local network required. Ensure **MagicDNS** is enabled in your [Tailscale admin DNS settings](https://login.tailscale.com/admin/dns).
-
-## API
+## API surface
 
 | Endpoint | Description |
-|----------|-------------|
-| `GET /api/dashboard` | Overview stats |
-| `POST /api/setup` | Save SSH public key |
-| `POST /api/images/homecloud-base/build` | Build base template (async job) |
+|---|---|
+| `GET  /api/dashboard` | Overview stats |
 | `POST /api/vms` | Create instance (async job) |
-| `GET /api/jobs/{id}` | Job status + logs |
-| `POST /api/jobs/{id}/cancel` | Cancel an in-flight job (e.g. a deploy) |
-| `POST /api/vms/{id}/start` | Start instance |
-| `POST /api/vms/{id}/stop` | Stop instance |
-| `POST /api/vms/{id}/suspend` | Pause (suspend to RAM) |
-| `POST /api/vms/{id}/resume` | Resume a suspended instance |
-| `DELETE /api/vms/{id}?name=...` | Delete instance |
-| `GET /api/config` | Public bootstrap config for the SPA (no auth) |
-| `GET /auth/verify` | Caddy forward-auth target (Clerk session gate) |
+| `POST /api/vms/{id}/start·stop·suspend·resume` | Lifecycle |
+| `DELETE /api/vms/{id}` | Delete instance + DNS + tailnet device |
+| `POST /api/images/homecloud-base/build` | Build base template |
+| `GET  /api/jobs/{id}` / `POST …/cancel` | Job status, logs, cancel |
+| `GET  /api/config` | Public bootstrap config for the SPA |
+| `GET  /auth/verify` | Caddy forward-auth target (Clerk session gate) |
 
-## Auth (Clerk)
+## Deploys
 
-The `/api/*` endpoints and every published instance app are gated by **Clerk**.
-Set `CLERK_JWKS_URL` + `CLERK_ISSUER` (and `CLERK_AUTHORIZED_PARTIES`) to enforce;
-when unset, auth is disabled for local/dev (logged loudly).
+- **Backend** — push to `main` → GitHub Actions on a self-hosted runner on the
+  control node → rebuild + restart the compose stack
+  ([docs/deploy-backend.md](docs/deploy-backend.md)).
+- **Web** — push to `main` → Cloudflare Workers Git builds both SPAs and
+  deploys the single `gavinf-prod` Worker
+  ([docs/deploy-web.md](docs/deploy-web.md)).
 
-The console is a React + Vite SPA in `frontend/`, deployed to **Cloudflare Workers** on
-push to `main` — see [`docs/deploy-frontend.md`](docs/deploy-frontend.md).
+## Design history
 
-Backend deploy: self-hosted GitHub Actions runner on the control node — see
-[`docs/deploy-backend.md`](docs/deploy-backend.md).
-
-Legacy config: [`legacy/initial`](../../tree/legacy/initial) branch.
+The system was built in phases — architecture, instance sizing, public DNS,
+tunnel + reverse proxy, port discovery, split DNS, web UI, auth. The original
+plan documents are preserved in [`docs/plan/`](docs/plan/).

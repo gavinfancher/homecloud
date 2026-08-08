@@ -17,15 +17,15 @@ __pycache__/
 # Tooling caches
 .wrangler/
 
-# Console (future)
-console/node_modules/
-console/.next/
-console/dist/
-
-# Frontend SPA (Vite build artifacts; source is committed)
+# Web apps (Vite build artifacts; source is committed)
 frontend/node_modules/
 frontend/dist/
 frontend/.wrangler/
+frontend/dashboard/node_modules/
+frontend/dashboard/dist/
+frontend/gavinf-prod/node_modules/
+frontend/gavinf-prod/dist/
+frontend/gavinf-prod/.wrangler/
 
 # Agent tooling artifacts (not project code)
 .agents/

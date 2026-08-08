@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install a GitHub Actions self-hosted runner on the control node VM.
-# Run on homecloud (ubuntu@100.76.205.59), not from your laptop.
+# Run on homecloud (ubuntu@100.74.161.39), not from your laptop.
 #
 # 1. GitHub → repo Settings → Actions → Runners → New self-hosted runner → Linux x64
 # 2. Copy the registration token (expires in ~1 hour)

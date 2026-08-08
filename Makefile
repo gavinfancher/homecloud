@@ -1,4 +1,4 @@
-.PHONY: install test build dev-api dev-web deploy-frontend deploy-stack deploy-remote smoke
+.PHONY: install test build dev-api dev-web deploy-web deploy-stack deploy-remote smoke
 
 COMPOSE_FILE := infra/docker/docker-compose.yml
 COMPOSE := docker compose -p homecloud -f $(COMPOSE_FILE) --env-file .env
@@ -22,8 +22,10 @@ dev-api:
 dev-web:
 	npm --prefix frontend run dev
 
-deploy-frontend:
-	./scripts/deploy-frontend.sh
+# Backup web deploy — the primary path is Cloudflare Workers Git on push to main.
+deploy-web:
+	npm --prefix frontend/gavinf-prod run build
+	npx --prefix frontend/gavinf-prod wrangler deploy -c frontend/gavinf-prod/wrangler.toml
 
 deploy-stack:
 	./scripts/deploy-stack.sh
