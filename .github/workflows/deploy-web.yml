@@ -1,12 +1,12 @@
-name: Deploy dashboard
+name: Deploy web
 
 on:
-  # Optional backup deploy — primary path is Cloudflare Workers Git (dashboard).
-  # Manual only; does not replace Cloudflare's Git integration.
+  # Optional backup deploy — primary path is Cloudflare Workers Git
+  # (gavinf-prod, root frontend/gavinf-prod). Manual only.
   workflow_dispatch:
 
 concurrency:
-  group: deploy-dashboard
+  group: deploy-web
   cancel-in-progress: false
 
 jobs:
@@ -15,18 +15,13 @@ jobs:
     environment: production
     defaults:
       run:
-        working-directory: frontend/dashboard
+        working-directory: frontend/gavinf-prod
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/dashboard/package-lock.json
-
-      - name: Install
-        run: npm ci
 
       - name: Build
         env:
@@ -38,6 +33,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: dashboard
+          workingDirectory: frontend/gavinf-prod
           wranglerVersion: "4"
           command: deploy
