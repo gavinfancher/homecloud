@@ -1,6 +1,6 @@
-// Shared portal rail — identical markup/styles live in the dash portal
-// (frontend/dashboard/src/PortalRail.tsx) and the proxmox-frame worker shell.
-// Keep the three in sync when changing anything here.
+// Shared portal rail — an identical plain-HTML copy lives in the
+// proxmox-frame worker shell. Keep the two in sync when changing anything
+// here. (dash.gavinf.com uses its own header instead of the rail.)
 import { useEffect, useState, type ReactNode } from 'react'
 
 type Site = 'dashboard' | 'homecloud' | 'proxmox'
