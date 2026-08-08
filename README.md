@@ -87,6 +87,8 @@ infra/
                      cloudflared, coredns)
   caddy/, coredns/   Base proxy config, split-DNS Corefile
 scripts/             Bootstrap + deploy helpers for the control node
+ssh/                 SSH config mounted into the controller for Proxmox
+                     access — keys live only on the control node, never in git
 tests/               Pytest suite
 docs/                Deploy runbooks + archived design/implementation plan
 ```
@@ -97,6 +99,8 @@ On the control node (or any Docker host that can reach Proxmox):
 
 ```bash
 cp .env.example .env        # Proxmox host/token, Tailscale keys, Clerk, domain
+# place the Proxmox SSH keypair in ssh/ (compose mounts it read-only into
+# the controller; ssh/config points "pve" at your Proxmox host)
 docker compose -f infra/docker/docker-compose.yml up -d --build
 curl localhost:8080/api/health
 ```
