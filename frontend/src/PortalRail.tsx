@@ -1,9 +1,11 @@
 // Shared portal rail — identical markup/styles live in the dash portal
 // (frontend/dashboard/src/PortalRail.tsx) and the proxmox-frame worker shell.
 // Keep the three in sync when changing anything here.
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 type Site = 'dashboard' | 'homecloud' | 'proxmox'
+
+const OPEN_KEY = 'portal-rail-open'
 
 const SITES: { id: Site; label: string; href: string; icon: ReactNode }[] = [
   {
@@ -31,9 +33,16 @@ const SITES: { id: Site; label: string; href: string; icon: ReactNode }[] = [
   },
 ]
 
-export function PortalRail({ active }: { active: Site }) {
+export function PortalRail({ active, foot }: { active: Site; foot?: ReactNode }) {
+  const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) === '1')
+  const toggle = () =>
+    setOpen((o) => {
+      localStorage.setItem(OPEN_KEY, o ? '0' : '1')
+      return !o
+    })
+
   return (
-    <nav className="portal-rail">
+    <nav className={`portal-rail ${open ? 'open' : ''}`}>
       <a
         className={`portal-rail-item portal-rail-brand ${active === 'dashboard' ? 'active' : ''}`}
         href="https://dash.gavinf.com"
@@ -64,6 +73,22 @@ export function PortalRail({ active }: { active: Site }) {
           <span className="portal-rail-label">{s.label}</span>
         </a>
       ))}
+      <div className="portal-rail-spacer" />
+      {foot && <div className="portal-rail-foot">{foot}</div>}
+      <button
+        type="button"
+        className="portal-rail-item portal-rail-toggle"
+        onClick={toggle}
+        title={open ? 'Collapse' : 'Expand'}
+      >
+        <span className="portal-rail-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M9 3v18" />
+          </svg>
+        </span>
+        <span className="portal-rail-label">Collapse</span>
+      </button>
     </nav>
   )
 }

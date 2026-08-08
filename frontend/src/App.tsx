@@ -4,7 +4,6 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
 import {
   IconActivity,
-  IconCloud,
   IconImages,
   IconInstances,
   IconOverview,
@@ -86,10 +85,9 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
 
   return (
     <div className="shell">
-      <PortalRail active="homecloud" />
+      <PortalRail active="homecloud" foot={devBypass ? undefined : <UserButton />} />
       <aside className="sidebar">
         <NavLink to="/overview" className="sidebar-brand" title="Overview">
-          <IconCloud width={22} height={22} />
           <span>homecloud</span>
         </NavLink>
         <nav className="sidebar-nav">
@@ -125,12 +123,10 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
           </div>
           <div className="spacer" />
           {!ready && <span className="muted small">connecting…</span>}
-          {devBypass ? (
+          {devBypass && (
             <span className="dev-badge" title="Auth bypassed for local dev">
               <StatusDot status="paused" /> dev · no auth
             </span>
-          ) : (
-            <UserButton />
           )}
         </header>
 

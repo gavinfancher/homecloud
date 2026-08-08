@@ -313,7 +313,7 @@ body {
   transition: width 0.16s ease;
 }
 
-.portal-rail:hover {
+.portal-rail.open {
   width: 220px;
 }
 
@@ -364,7 +364,7 @@ body {
   transition: opacity 0.12s ease;
 }
 
-.portal-rail:hover .portal-rail-label {
+.portal-rail.open .portal-rail-label {
   opacity: 1;
 }
 
@@ -377,4 +377,26 @@ body {
 
 .dash-shell {
   margin-left: 56px;
+}
+
+.portal-rail-spacer {
+  flex: 1;
+}
+
+.portal-rail-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 4px 3px;
+  margin-bottom: 2px;
+}
+
+.portal-rail-toggle {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+  text-align: left;
 }

@@ -35,11 +35,7 @@ export function Dashboard() {
   useEffect(() => { document.title = 'Dashboard' }, [])
   return (
     <div className="dash-shell">
-      <PortalRail active="dashboard" />
-      <header className="dash-header">
-        <div className="spacer" />
-        <UserButton />
-      </header>
+      <PortalRail active="dashboard" foot={<UserButton />} />
 
       <main className="dash-content">
         <p className="dash-section-label">Services</p>
