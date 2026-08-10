@@ -31,7 +31,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-homecloud}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # postgres:18+ wants the mount one level up from the data directory: it
+      # stores data in a major-version subdirectory so pg_upgrade --link works
+      # without crossing a mount boundary. Mounting …/data directly aborts boot.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-homecloud} -d ${POSTGRES_DB:-homecloud}"]
       interval: 5s
