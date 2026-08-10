@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 import threading
 import time
@@ -256,6 +257,105 @@ class ProxmoxClient:
             time.sleep(poll)
         raise TimeoutError(f"Proxmox task {upid} timed out after {timeout}s")
 
+    # ------------------------------------------------------------------
+    # Cloud image import (requires PROXMOX_SSH_HOST — `qm` runs on the node)
+    # ------------------------------------------------------------------
+
+    def ssh_exec(self, command: str, *, timeout: int = 600) -> str:
+        """Run a shell command on the Proxmox node over SSH.
+
+        Raises RuntimeError when PROXMOX_SSH_HOST is unset, since disk import
+        has no API equivalent.
+        """
+        if not settings.proxmox_ssh_host:
+            raise RuntimeError(
+                "PROXMOX_SSH_HOST is not configured — importing cloud images "
+                "requires SSH access to the Proxmox node"
+            )
+        result = subprocess.run(
+            ["ssh", settings.proxmox_ssh_host, command],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Proxmox node command failed ({result.returncode}): "
+                f"{result.stderr.strip() or command}"
+            )
+        return result.stdout
+
+    def cloud_image_exists(self, remote_path: str) -> bool:
+        try:
+            self.ssh_exec(f"test -s {shlex.quote(remote_path)}", timeout=30)
+        except RuntimeError:
+            return False
+        return True
+
+    def download_cloud_image(
+        self,
+        url: str,
+        remote_path: str,
+        *,
+        sha256: str | None = None,
+        timeout: int = 1800,
+    ) -> None:
+        """Fetch a distro cloud image onto the node, then verify it.
+
+        Downloads to a temporary path and moves it into place only after the
+        checksum passes, so an interrupted transfer never poisons the cache.
+        """
+        quoted = shlex.quote(remote_path)
+        tmp = shlex.quote(f"{remote_path}.part")
+        self.ssh_exec(f"mkdir -p {shlex.quote(str(Path(remote_path).parent))}", timeout=30)
+        self.ssh_exec(f"curl -fL --retry 3 -o {tmp} {shlex.quote(url)}", timeout=timeout)
+        if sha256:
+            out = self.ssh_exec(f"sha256sum {tmp}", timeout=300)
+            actual = out.split()[0] if out.split() else ""
+            if actual.lower() != sha256.lower():
+                self.ssh_exec(f"rm -f {tmp}", timeout=30)
+                raise RuntimeError(
+                    f"Checksum mismatch for {url}: expected {sha256}, got {actual}"
+                )
+        self.ssh_exec(f"mv {tmp} {quoted}", timeout=60)
+
+    def create_vm(
+        self,
+        vmid: int,
+        name: str,
+        *,
+        cores: int = 2,
+        memory_mb: int = 2048,
+    ) -> str:
+        """Create an empty VM shell suitable for a cloud image disk."""
+        return self._api.nodes(self.node).qemu.post(
+            vmid=vmid,
+            name=name,
+            cores=cores,
+            memory=memory_mb,
+            net0=f"virtio,bridge={settings.proxmox_bridge}",
+            scsihw="virtio-scsi-pci",
+            ostype="l26",
+            agent=1,
+            serial0="socket",
+            vga="serial0",
+        )
+
+    def import_cloud_image_disk(self, vmid: int, remote_path: str) -> None:
+        """Import a downloaded cloud image as the VM's scsi0 boot disk."""
+        self.ssh_exec(
+            f"qm set {vmid} --scsi0 "
+            f"{shlex.quote(self.storage)}:0,import-from={shlex.quote(remote_path)}",
+            timeout=1800,
+        )
+
+    def attach_cloudinit_drive(self, vmid: int) -> None:
+        """Add the cloud-init drive and make the imported disk bootable."""
+        self._api.nodes(self.node).qemu(vmid).config.put(
+            ide2=f"{self.storage}:cloudinit",
+            boot="order=scsi0",
+        )
+
     def get_vm_config(self, vmid: int) -> dict:
         return self._api.nodes(self.node).qemu(vmid).config.get()
 
@@ -267,6 +367,42 @@ class ProxmoxClient:
         if isinstance(result, dict):
             return result.get("out-data", "") or str(result)
         return str(result)
+
+    def guest_run(self, vmid: int, command: list[str], *, timeout: int = 300) -> dict:
+        """Run a command in the guest and wait for it to exit.
+
+        ``agent exec`` only returns a pid; the result has to be collected from
+        ``agent exec-status``.  Returns ``{"exitcode", "out", "err"}``.
+        """
+        started = self._api.nodes(self.node).qemu(vmid).agent("exec").post(command=command)
+        pid = started.get("pid") if isinstance(started, dict) else None
+        if pid is None:
+            return {"exitcode": 0, "out": "", "err": ""}
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status = self._api.nodes(self.node).qemu(vmid).agent("exec-status").get(pid=pid)
+            if status.get("exited"):
+                return {
+                    "exitcode": status.get("exitcode", 0),
+                    "out": status.get("out-data", "") or "",
+                    "err": status.get("err-data", "") or "",
+                }
+            time.sleep(2)
+        raise TimeoutError(f"Guest command on VM {vmid} timed out after {timeout}s")
+
+    def wait_for_guest_file(self, vmid: int, path: str, *, timeout: int = 900) -> None:
+        """Block until *path* exists in the guest (used for build-done markers)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                result = self.guest_run(vmid, ["test", "-f", path], timeout=30)
+                if result["exitcode"] == 0:
+                    return
+            except Exception:  # agent not up yet, or command raced with boot
+                pass
+            time.sleep(5)
+        raise TimeoutError(f"VM {vmid} never produced {path} — cloud-init may have failed")
 
     def wait_for_guest_agent(self, vmid: int, *, timeout: int = 180) -> None:
         import time

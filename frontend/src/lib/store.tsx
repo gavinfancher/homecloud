@@ -12,6 +12,7 @@ import {
   createApi,
   CONN_FAIL_THRESHOLD,
   type Api,
+  type CloudImage,
   type Dashboard,
   type Image,
   type Size,
@@ -25,6 +26,8 @@ interface Store {
   vms: VM[]
   sizes: Size[]
   images: Image[]
+  /** Upstream distro base images. Empty when the controller has no database. */
+  cloudImages: CloudImage[]
   ready: boolean
   connError: string | null
   refresh: () => Promise<void>
@@ -56,6 +59,7 @@ export function StoreProvider({
   const [vms, setVms] = useState<VM[]>([])
   const [sizes, setSizes] = useState<Size[]>([])
   const [images, setImages] = useState<Image[]>([])
+  const [cloudImages, setCloudImages] = useState<CloudImage[]>([])
   const [ready, setReady] = useState(false)
   const [connError, setConnError] = useState<string | null>(null)
   const [activeJob, setActiveJob] = useState<string | null>(null)
@@ -100,6 +104,11 @@ export function StoreProvider({
     } catch {
       /* non-fatal */
     }
+    try {
+      setCloudImages(await api.cloudImages())
+    } catch {
+      /* 503 when no database is configured — the picker stays empty */
+    }
   }, [api])
 
   useEffect(() => {
@@ -117,6 +126,7 @@ export function StoreProvider({
       vms,
       sizes,
       images,
+      cloudImages,
       ready,
       connError,
       refresh,
@@ -125,7 +135,19 @@ export function StoreProvider({
       openJob: setActiveJob,
       closeJob: () => setActiveJob(null),
     }),
-    [api, dashboard, vms, sizes, images, ready, connError, refresh, refreshImages, activeJob],
+    [
+      api,
+      dashboard,
+      vms,
+      sizes,
+      images,
+      cloudImages,
+      ready,
+      connError,
+      refresh,
+      refreshImages,
+      activeJob,
+    ],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

@@ -45,16 +45,60 @@ export interface Size {
   disk_gb: number
 }
 
+export interface ConfigFile {
+  path: string
+  content: string
+  permissions?: string | null
+  owner?: string | null
+}
+
+export type ImageStatus = 'draft' | 'building' | 'built' | 'failed'
+
 export interface Image {
   id: string
   name: string
   description: string
+  kind: 'builtin' | 'custom'
+  cloud_image_id: string | null
   built: boolean
+  status: ImageStatus
   template_id: number | null
   default_cores: number
   default_memory_mb: number
   default_disk_gb: number
   packages: string[]
+  config_files: ConfigFile[]
+  run_commands: string[]
+  build_error: string | null
+}
+
+export interface CloudImage {
+  id: string
+  name: string
+  distro: string
+  version: string
+  arch: string
+  url: string
+  sha256: string | null
+  ssh_user: string
+  builtin: boolean
+  template_id: number | null
+  imported: boolean
+  imported_at: string | null
+}
+
+/** Body for creating a custom image. */
+export interface CustomImageBody {
+  id: string
+  name: string
+  description: string
+  cloud_image_id: string
+  packages: string[]
+  config_files: ConfigFile[]
+  run_commands: string[]
+  default_cores: number
+  default_memory_mb: number
+  default_disk_gb: number
 }
 
 export interface JobLog {
@@ -184,6 +228,14 @@ export function createApi(getToken: TokenGetter) {
     sizes: () => req<Size[]>('/api/sizes'),
     images: () => req<Image[]>('/api/images'),
     buildBaseImage: () => req<{ job_id: string }>('/api/images/homecloud-base/build', { method: 'POST' }),
+    cloudImages: () => req<CloudImage[]>('/api/cloud-images'),
+    createImage: (body: CustomImageBody) =>
+      req<Image>('/api/images', { method: 'POST', body: JSON.stringify(body) }),
+    updateImage: (id: string, body: Partial<CustomImageBody>) =>
+      req<Image>(`/api/images/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteImage: (id: string) => req<{ deleted: string }>(`/api/images/${id}`, { method: 'DELETE' }),
+    buildImage: (id: string) =>
+      req<{ job_id: string }>(`/api/images/${id}/build`, { method: 'POST' }),
     deploy: (body: DeployBody) =>
       req<{ job_id: string }>('/api/vms', { method: 'POST', body: JSON.stringify(body) }),
     listJobs: (limit = 30) => req<Job[]>(`/api/jobs?limit=${limit}`),

@@ -17,7 +17,26 @@ services:
       - coredns_zones:/etc/coredns
     working_dir: /app
     depends_on:
-      - caddy
+      caddy:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18.4
+    container_name: homecloud-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-homecloud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-homecloud}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-homecloud} -d ${POSTGRES_DB:-homecloud}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   caddy:
     image: caddy:2
@@ -57,3 +76,4 @@ services:
 volumes:
   caddy_sites:
   coredns_zones:
+  postgres_data:

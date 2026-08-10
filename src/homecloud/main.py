@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from homecloud.api.routes import auth_router, public_router, router
 from homecloud.auth import require_auth
 from homecloud.config import settings
+from homecloud.db import db_enabled, init_db
 from homecloud.state import hydrate_registry
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -49,6 +50,17 @@ def index() -> dict:
 @app.on_event("startup")
 def startup() -> None:
     hydrate_registry()
+    if db_enabled():
+        # A database hiccup must not stop the controller from serving instances;
+        # the image views degrade to the built-in registry until it recovers.
+        try:
+            init_db()
+        except Exception:
+            logging.getLogger(__name__).exception("Image database unavailable at startup")
+    else:
+        logging.getLogger(__name__).warning(
+            "DATABASE_URL is unset — custom images are disabled (built-in registry only)"
+        )
 
 
 def cli() -> None:

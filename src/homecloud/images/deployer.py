@@ -30,6 +30,19 @@ def _noop_log(_level: str, _message: str) -> None:
     pass
 
 
+def _custom_image_template(image_id: str) -> int | None:
+    """Template id of a DB-defined custom image, or None if it has no build."""
+    from homecloud.db.session import db_enabled  # noqa: PLC0415
+    from homecloud.images.store import get_custom_image  # noqa: PLC0415
+
+    if not db_enabled():
+        raise ValueError(f"Unknown image: {image_id}")
+    image = get_custom_image(image_id)
+    if image is None:
+        raise ValueError(f"Unknown image: {image_id}")
+    return image["template_id"] if image["built"] else None
+
+
 class VMDeployer:
     """Deploy VMs: join Tailscale, expose MagicDNS hostname."""
 
@@ -65,12 +78,14 @@ class VMDeployer:
             raise ValueError("TAILSCALE_API_KEY required — to resolve Tailscale IPs")
 
         spec = get_image(image_id)
-        if spec is None:
-            raise ValueError(f"Unknown image: {image_id}")
-        template_id = spec.template_id or get_built_template(image_id)
+        if spec is not None:
+            template_id = spec.template_id or get_built_template(image_id)
+        else:
+            # Not a built-in — look for a custom image definition in the DB.
+            template_id = _custom_image_template(image_id)
         if template_id is None:
             raise ValueError(
-                "Base image not built yet — complete setup and build the base image first"
+                f"Image '{image_id}' is not built yet — build it before deploying instances"
             )
 
         ssh_keys = get_ssh_public_keys()

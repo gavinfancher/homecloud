@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 
 import httpx
@@ -7,13 +8,23 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from homecloud.access import ssh_config_block
-from homecloud.api.schemas import DeployVMRequest, PublishServiceRequest, SetupRequest
+from homecloud.api.schemas import (
+    CloudImageRequest,
+    CustomImageRequest,
+    CustomImageUpdate,
+    DeployVMRequest,
+    PublishServiceRequest,
+    SetupRequest,
+)
 from homecloud.auth import extract_token, get_clerk_auth
 from homecloud.config import settings
+from homecloud.db.session import db_enabled
 from homecloud.dns.names import connection_info, vm_fqdn
+from homecloud.images import store as image_store
 from homecloud.images.builder import ImageBuilder
 from homecloud.images.deployer import VMDeployer, VMManager
 from homecloud.images.registry import list_images
+from homecloud.images.store import ImageConflict, ImageNotFound
 from homecloud.jobs import JobCancelled, job_store
 from homecloud.ports import scan_ports
 from homecloud.proxmox.client import ProxmoxClient
@@ -30,6 +41,8 @@ from homecloud.state import (
     set_built_template,
     set_instance_ports,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["api"])
 # Unauthenticated endpoints (health + SPA bootstrap config).
@@ -193,23 +206,114 @@ def sizes_list() -> list[dict]:
     ]
 
 
+def _require_db() -> None:
+    if not db_enabled():
+        raise HTTPException(
+            503,
+            "Custom images need a database — set DATABASE_URL and start the postgres service",
+        )
+
+
+def _image_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ImageNotFound):
+        return HTTPException(404, str(exc))
+    if isinstance(exc, ImageConflict):
+        return HTTPException(409, str(exc))
+    return HTTPException(400, str(exc))
+
+
 @router.get("/images")
 def images_list() -> list[dict]:
+    """Built-in registry images plus every custom image defined in the DB."""
     hydrate_registry()
-    return [
+    images = [
         {
             "id": img.id,
             "name": img.name,
             "description": img.description,
+            "kind": "builtin",
+            "cloud_image_id": None,
             "built": (img.template_id or get_built_template(img.id)) is not None,
+            "status": (
+                "built" if (img.template_id or get_built_template(img.id)) else "draft"
+            ),
             "template_id": img.template_id or get_built_template(img.id),
             "default_cores": img.default_cores,
             "default_memory_mb": img.default_memory_mb,
             "default_disk_gb": img.default_disk_gb,
             "packages": img.packages,
+            "config_files": [],
+            "run_commands": [],
+            "build_error": None,
         }
         for img in list_images()
     ]
+    if db_enabled():
+        try:
+            images.extend(image_store.list_custom_images())
+        except Exception as exc:  # DB down — still serve the built-ins
+            logger.warning("Could not load custom images: %s", exc)
+    return images
+
+
+@router.get("/cloud-images")
+def cloud_images_list() -> list[dict]:
+    """Upstream distro cloud images available as a base layer."""
+    _require_db()
+    return image_store.list_cloud_images()
+
+
+@router.post("/cloud-images", status_code=201)
+def cloud_image_create(body: CloudImageRequest) -> dict:
+    _require_db()
+    try:
+        return image_store.create_cloud_image(body.model_dump())
+    except (ImageNotFound, ImageConflict) as exc:
+        raise _image_error(exc) from exc
+
+
+@router.delete("/cloud-images/{cloud_image_id}")
+def cloud_image_delete(cloud_image_id: str) -> dict:
+    _require_db()
+    try:
+        return image_store.delete_cloud_image(cloud_image_id)
+    except (ImageNotFound, ImageConflict) as exc:
+        raise _image_error(exc) from exc
+
+
+@router.post("/images", status_code=201)
+def image_create(body: CustomImageRequest) -> dict:
+    """Define a custom image. Creating it does not build it — POST …/build next."""
+    _require_db()
+    payload = body.model_dump()
+    payload["config_files"] = [f.model_dump(exclude_none=True) for f in body.config_files]
+    try:
+        return image_store.create_custom_image(payload)
+    except (ImageNotFound, ImageConflict) as exc:
+        raise _image_error(exc) from exc
+
+
+@router.patch("/images/{image_id}")
+def image_update(image_id: str, body: CustomImageUpdate) -> dict:
+    _require_db()
+    changes = body.model_dump(exclude_unset=True)
+    if body.config_files is not None:
+        changes["config_files"] = [f.model_dump(exclude_none=True) for f in body.config_files]
+    if not changes:
+        raise HTTPException(400, "No fields to update")
+    try:
+        return image_store.update_custom_image(image_id, changes)
+    except (ImageNotFound, ImageConflict) as exc:
+        raise _image_error(exc) from exc
+
+
+@router.delete("/images/{image_id}")
+def image_delete(image_id: str) -> dict:
+    _require_db()
+    try:
+        return image_store.delete_custom_image(image_id)
+    except (ImageNotFound, ImageConflict) as exc:
+        raise _image_error(exc) from exc
 
 
 @router.post("/images/homecloud-base/build")
@@ -227,6 +331,35 @@ def build_image() -> dict:
         try:
             result = builder.build_builtin("homecloud-base", log=job_store.logger(job["id"]))
             set_built_template("homecloud-base", result["template_id"])
+            job_store.complete(job["id"], result)
+        except Exception as exc:
+            job_store.fail(job["id"], str(exc))
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job_id": job["id"]}
+
+
+@router.post("/images/{image_id}/build")
+def build_custom_image(image_id: str) -> dict:
+    """Bake a custom image into a Proxmox template. Returns a job to follow."""
+    _require_db()
+    if not is_setup_complete():
+        raise HTTPException(400, "Upload your SSH public key in setup first")
+
+    image = image_store.get_custom_image(image_id)
+    if image is None:
+        raise HTTPException(404, f"Unknown image: {image_id}")
+    if image["status"] == "building":
+        raise HTTPException(409, "Image is already building")
+
+    job = job_store.create("build_image", label=image_id, meta={"image_id": image_id})
+
+    def run() -> None:
+        job_store.start(job["id"])
+        try:
+            result = ImageBuilder().build_custom_image(
+                image_id, log=job_store.logger(job["id"])
+            )
             job_store.complete(job["id"], result)
         except Exception as exc:
             job_store.fail(job["id"], str(exc))

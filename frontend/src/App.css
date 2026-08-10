@@ -1265,13 +1265,83 @@ textarea {
   padding: 2px 7px;
   color: #c9d4e2;
 }
+.pkg-file {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
 .image-card-foot {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 8px;
   margin-top: auto;
   padding-top: 4px;
+}
+.image-error {
+  font-size: 12px;
+  max-height: 96px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+/* ── Image builder ───────────────────────────────────── */
+.modal-wide {
+  width: min(760px, calc(100vw - 32px));
+}
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.btn-danger {
+  color: var(--danger);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+input.invalid,
+textarea.invalid {
+  border-color: var(--danger);
+}
+.config-file {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+.config-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Path takes the slack; mode and owner stay at their natural width. */
+.config-file-head > input:first-child {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12.5px;
+}
+.config-file-mode {
+  width: 76px;
+  flex-shrink: 0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12.5px;
+}
+.config-file-owner {
+  width: 120px;
+  flex-shrink: 0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12.5px;
+}
+.config-file-content {
+  width: 100%;
 }
 
 /* ── Jobs table ──────────────────────────────────────── */

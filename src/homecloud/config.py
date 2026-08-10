@@ -18,6 +18,14 @@ class Settings(BaseSettings):
     proxmox_ssh_host: str = ""
     proxmox_base_template_id: int = 9000
 
+    # Database (image catalog + custom image definitions).
+    # Empty → the DB-backed image store is disabled and only the built-in
+    # registry is served, so local runs/tests work without Postgres.
+    database_url: str = ""
+
+    # Where downloaded distro cloud images are cached on the Proxmox node.
+    cloud_image_cache_dir: str = "/var/lib/vz/template/iso"
+
     # Tailscale — VMs join tailnet; SSH via MagicDNS (name.tailnet.ts.net)
     tailscale_api_key: str = ""
     tailscale_tailnet: str = ""

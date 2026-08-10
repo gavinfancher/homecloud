@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from homecloud.config import settings
 from homecloud.images.cloud_init import render_cloud_init
@@ -89,6 +90,127 @@ class ImageBuilder:
             "name": name,
             "status": "ready",
         }
+
+    def build_custom_image(self, image_id: str, *, log: LogFn | None = None) -> dict:
+        """Build a user-defined image: cloud image + packages + config files.
+
+        Imports (or reuses) the base cloud image template, clones it, bakes the
+        definition in via cloud-init, then converts the result to a template.
+        """
+        from homecloud.db.models import BuildStatus, CustomImage  # noqa: PLC0415
+        from homecloud.db.session import session_scope  # noqa: PLC0415
+        from homecloud.images.composer import (  # noqa: PLC0415, E501
+            BOOTSTRAP_DONE_MARKER,
+            compose_cloud_init,
+        )
+        from homecloud.images.importer import ensure_cloud_image_template  # noqa: PLC0415
+
+        emit = log or _noop_log
+        ssh_keys = get_ssh_public_keys()
+        if not ssh_keys:
+            raise ValueError("Complete setup and upload your SSH public key before building images")
+
+        with session_scope() as session:
+            image = session.get(CustomImage, image_id)
+            if image is None:
+                raise ValueError(f"Unknown image: {image_id}")
+
+            image.status = BuildStatus.BUILDING
+            image.build_error = None
+            # Snapshot what the build needs so the work below — minutes of
+            # downloading and booting — does not hold the transaction open.
+            cloud_image_id = image.cloud_image_id
+            plan = {
+                "packages": list(image.packages or []),
+                "config_files": list(image.config_files or []),
+                "run_commands": list(image.run_commands or []),
+                "cores": image.default_cores,
+                "memory_mb": image.default_memory_mb,
+                "disk_gb": image.default_disk_gb,
+            }
+
+        # The image bakes in VM_SSH_USER (not the distro's default login) so
+        # every image deploys and is reachable the same way, whatever the base.
+        ssh_user = settings.vm_ssh_user
+        vmid: int | None = None
+        tpl_name = f"tpl-{image_id}"
+
+        try:
+            base_template = ensure_cloud_image_template(
+                cloud_image_id, proxmox=self.proxmox, log=emit
+            )
+            vmid = self.proxmox.next_vmid(start=8000)
+
+            emit("info", f"Cloning base template {base_template} → build VM {vmid}")
+            self.proxmox.wait_for_task(
+                self.proxmox.clone_template(base_template, vmid, tpl_name)
+            )
+
+            emit("info", "Applying cloud-init (packages, config files, commands)…")
+            user_data = compose_cloud_init(
+                hostname=tpl_name,
+                ssh_user=ssh_user,
+                ssh_public_keys=ssh_keys,
+                packages=plan["packages"],
+                config_files=plan["config_files"],
+                run_commands=plan["run_commands"],
+            )
+            self.proxmox.set_cloudinit(
+                vmid,
+                user_data=user_data,
+                ciuser=ssh_user,
+                ipconfig0="ip=dhcp",
+                sshkeys=ssh_keys,
+            )
+
+            self.proxmox.set_resources(
+                vmid, cores=plan["cores"], memory_mb=plan["memory_mb"]
+            )
+            self.proxmox.resize_disk(vmid, "scsi0", plan["disk_gb"])
+
+            emit("info", f"Starting build VM {vmid}")
+            self.proxmox.wait_for_task(self.proxmox.start(vmid), timeout=120)
+
+            emit("info", "Waiting for cloud-init to finish provisioning…")
+            self.proxmox.wait_for_guest_file(vmid, BOOTSTRAP_DONE_MARKER, timeout=1800)
+
+            emit("info", "Preparing VM for templating (cloud-init clean)")
+            self.proxmox.prepare_for_template(vmid)
+
+            emit("info", "Stopping VM and converting to template")
+            self.proxmox.wait_for_task(self.proxmox.stop(vmid), timeout=120)
+            self.proxmox.convert_to_template(vmid)
+        except Exception as exc:
+            # Best-effort cleanup: a half-built VM left on the node just eats
+            # disk and confuses the instance list.
+            if vmid is not None:
+                emit("warn", f"Build failed — removing build VM {vmid}")
+                try:
+                    self.proxmox.stop(vmid)
+                except Exception:
+                    logger.debug("Could not stop build VM %s", vmid, exc_info=True)
+                try:
+                    self.proxmox.delete_vm(vmid)
+                except Exception:
+                    logger.warning("Leftover build VM %s needs manual cleanup", vmid)
+
+            with session_scope() as session:
+                failed = session.get(CustomImage, image_id)
+                if failed is not None:
+                    failed.status = BuildStatus.FAILED
+                    failed.build_error = str(exc)
+            raise
+
+        with session_scope() as session:
+            built = session.get(CustomImage, image_id)
+            if built is not None:
+                built.status = BuildStatus.BUILT
+                built.template_id = vmid
+                built.build_error = None
+                built.built_at = datetime.now(UTC)
+
+        emit("info", f"Image {image_id} ready — template #{vmid}")
+        return {"image_id": image_id, "template_id": vmid, "name": tpl_name, "status": "built"}
 
     def build_custom(
         self,

@@ -33,6 +33,12 @@ ingress, and a web console, all driven by a single FastAPI service.
   logs (`POST /api/vms` returns a `job_id`; poll `/api/jobs/{id}`).
 - **Image pipeline** — builds a cloud-init base template on Proxmox and clones
   instances from it; per-app deploy specs are Jinja2 cloud-init templates.
+- **Custom images** — pick an upstream distro cloud image (Ubuntu, Debian,
+  Fedora, Rocky), declare the packages, config files, and shell commands you
+  want baked in, and the controller downloads the image onto the node, imports
+  it, bakes your definition in via cloud-init, and converts the result to a
+  reusable Proxmox template. Definitions live in Postgres; the downloaded base
+  is cached so only the first build pays for it.
 - **Zero-config networking** — every instance auto-joins the Tailscale
   tailnet; SSH works from anywhere via MagicDNS with no port forwarding.
 - **Private DNS** — the controller renders an RFC 1035 zone file and serves
@@ -58,6 +64,7 @@ ingress, and a web console, all driven by a single FastAPI service.
 | Networking | Tailscale (WireGuard mesh, MagicDNS, split DNS), CoreDNS |
 | Ingress | Cloudflare Tunnel, Caddy, Cloudflare DNS API |
 | Auth | Clerk (JWT verification, forward-auth SSO cookie) |
+| Data | Postgres 18.4 + SQLAlchemy (image catalog and custom image definitions) |
 | Web | React + TypeScript + Vite, single Cloudflare Worker serving all sites |
 | Runtime | Docker Compose on a control-node VM |
 | CI/CD | GitHub Actions (tests + self-hosted-runner backend deploy), Cloudflare Workers Git (web) |
@@ -69,7 +76,9 @@ ingress, and a web console, all driven by a single FastAPI service.
 src/homecloud/       Controller (FastAPI)
   api/               REST routes + schemas
   proxmox/           Proxmox API client (VM lifecycle, cloud-init)
-  images/            Base-template builder, cloud-init specs, app deployer
+  images/            Image builder, cloud image catalog/importer, cloud-init
+                     composer, image store, app deployer
+  db/                SQLAlchemy models + session (Postgres)
   tailscale/         Tailscale API client + SSH config helpers
   cloudflare/        Idempotent DNS records → tunnel
   dns/               Zone rendering for CoreDNS (private split DNS)
@@ -135,6 +144,12 @@ A few minutes later: `ssh ubuntu@dagster` over the tailnet, private DNS at
 | `POST /api/vms/{id}/start·stop·suspend·resume` | Lifecycle |
 | `DELETE /api/vms/{id}` | Delete instance + DNS + tailnet device |
 | `POST /api/images/homecloud-base/build` | Build base template |
+| `GET  /api/cloud-images` | Upstream distro cloud images (base layer catalog) |
+| `POST /api/cloud-images` | Register your own cloud image URL |
+| `GET  /api/images` | Built-in + custom image definitions |
+| `POST /api/images` | Define a custom image (packages, config files, commands) |
+| `PATCH·DELETE /api/images/{id}` | Edit or remove a custom image definition |
+| `POST /api/images/{id}/build` | Bake a custom image into a template (async job) |
 | `GET  /api/jobs/{id}` / `POST …/cancel` | Job status, logs, cancel |
 | `GET  /api/config` | Public bootstrap config for the SPA |
 | `GET  /auth/verify` | Caddy forward-auth target (Clerk session gate) |
