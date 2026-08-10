@@ -13,6 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 from homecloud.api.schemas import CloudImageRequest, ConfigFileSpec, CustomImageRequest
+from homecloud.images.builder import _cloud_init_error_detail
 from homecloud.images.catalog import BUILTIN_CATALOG
 from homecloud.images.composer import (
     BOOTSTRAP_DONE_MARKER,
@@ -43,25 +44,44 @@ def test_cloud_init_is_valid_yaml():
     assert isinstance(yaml.safe_load(_compose()), dict)
 
 
-def test_guest_agent_is_always_installed_and_enabled():
-    doc = yaml.safe_load(_compose())
-    assert "qemu-guest-agent" in doc["packages"]
-    assert ["systemctl", "enable", "--now", "qemu-guest-agent"] in doc["runcmd"]
+def test_guest_agent_is_never_in_the_packages_list():
+    """cloud-init installs `packages:` in one call, so a bad user package there
+    would take the agent down with it and strand the build."""
+    doc = yaml.safe_load(_compose(packages=["nginx"]))
+    assert "qemu-guest-agent" not in doc.get("packages", [])
 
 
-def test_user_packages_follow_the_required_ones():
+def test_guest_agent_is_installed_first_from_runcmd():
+    doc = yaml.safe_load(_compose(packages=["nginx"], run_commands=["echo hi"]))
+    first = doc["runcmd"][0]
+    assert first[0] == "bash"
+    assert "qemu-guest-agent" in first[2]
+    assert "systemctl enable --now qemu-guest-agent" in first[2]
+
+
+def test_agent_bootstrap_covers_apt_and_dnf_distros():
+    script = yaml.safe_load(_compose())["runcmd"][0][2]
+    assert "apt-get install -y qemu-guest-agent" in script
+    assert "dnf install -y qemu-guest-agent" in script
+
+
+def test_user_packages_are_passed_through_in_order():
     doc = yaml.safe_load(_compose(packages=["nginx", "htop"]))
-    assert doc["packages"] == ["qemu-guest-agent", "nginx", "htop"]
+    assert doc["packages"] == ["nginx", "htop"]
 
 
 def test_duplicate_packages_are_collapsed():
-    doc = yaml.safe_load(_compose(packages=["nginx", "nginx", "qemu-guest-agent"]))
-    assert doc["packages"] == ["qemu-guest-agent", "nginx"]
+    doc = yaml.safe_load(_compose(packages=["nginx", "nginx", "htop"]))
+    assert doc["packages"] == ["nginx", "htop"]
 
 
 def test_blank_packages_are_dropped():
     doc = yaml.safe_load(_compose(packages=["nginx", "  ", ""]))
-    assert doc["packages"] == ["qemu-guest-agent", "nginx"]
+    assert doc["packages"] == ["nginx"]
+
+
+def test_no_packages_key_when_none_requested():
+    assert "packages" not in yaml.safe_load(_compose())
 
 
 def test_config_files_become_write_files():
@@ -91,9 +111,7 @@ def test_no_write_files_key_when_no_config_files():
 def test_run_commands_land_between_agent_setup_and_the_done_marker():
     doc = yaml.safe_load(_compose(run_commands=["echo hi", "systemctl restart nginx"]))
     runcmd = doc["runcmd"]
-    assert runcmd.index("echo hi") > runcmd.index(
-        ["systemctl", "enable", "--now", "qemu-guest-agent"]
-    )
+    assert runcmd.index("echo hi") == 1
     assert runcmd.index("systemctl restart nginx") < runcmd.index(
         ["touch", BOOTSTRAP_DONE_MARKER]
     )
@@ -129,6 +147,91 @@ def test_normalize_config_file_omits_unset_optionals():
         "path": "/etc/a",
         "content": "x",
     }
+
+
+# ---------------------------------------------------------------------------
+# builder — reading cloud-init's verdict
+# ---------------------------------------------------------------------------
+
+# Verbatim from a build that requested `nvim` (which does not exist on Debian).
+REAL_PACKAGE_FAILURE = (
+    "status: error\n"
+    "boot_status_code: enabled-by-generator\n"
+    "last_update: Mon, 10 Aug 2026 16:33:29 +0000\n"
+    "detail:\n"
+    "('package-update-upgrade-install', ProcessExecutionError(\"Unexpected error while "
+    "running command.\\nCommand: ['apt-get', '--option=Dpkg::Options::=--force-confold', "
+    "'--assume-yes', '--quiet', 'install', 'qemu-guest-agent', 'nvim', 'btop']\\n"
+    "Exit code: 100\\nReason: -\\nStdout: -\\nStderr: -\"))"
+)
+
+
+def test_package_failure_names_the_packages_that_were_attempted():
+    detail = _cloud_init_error_detail(REAL_PACKAGE_FAILURE)
+    assert "nvim" in detail
+    assert "btop" in detail
+
+
+def test_package_failure_explains_the_all_or_nothing_install():
+    detail = _cloud_init_error_detail(REAL_PACKAGE_FAILURE)
+    assert "one command" in detail
+    assert "neovim" in detail, "should point at the actual Debian package name"
+
+
+def test_unrecognised_failure_falls_back_to_the_raw_detail():
+    output = "status: error\ndetail:\n('something-else', RuntimeError('disk full'))"
+    assert "disk full" in _cloud_init_error_detail(output)
+
+
+def test_error_detail_is_bounded():
+    output = "status: error\ndetail:\n" + ("x" * 5000)
+    assert len(_cloud_init_error_detail(output)) <= 400
+
+
+# ---------------------------------------------------------------------------
+# wait_for_guest_file — cancellation
+# ---------------------------------------------------------------------------
+
+
+class _FakeProxmox:
+    """Guest that never produces the marker, so the wait always polls."""
+
+    def __init__(self):
+        self.polls = 0
+
+    def guest_run(self, vmid, command, timeout=30):
+        self.polls += 1
+        return {"exitcode": 1, "out": "", "err": ""}
+
+
+def test_wait_for_guest_file_aborts_when_cancelled():
+    """Without this the console's Cancel button does nothing for ~30 minutes."""
+    from homecloud.jobs import JobCancelled
+    from homecloud.proxmox.client import ProxmoxClient
+
+    fake = _FakeProxmox()
+
+    def check_cancel():
+        raise JobCancelled("cancelled by user")
+
+    with pytest.raises(JobCancelled):
+        ProxmoxClient.wait_for_guest_file(
+            fake, 8001, "/var/lib/homecloud/image-build.done", check_cancel=check_cancel
+        )
+    assert fake.polls == 0, "must bail out before polling the guest"
+
+
+def test_wait_for_guest_file_returns_once_the_marker_exists():
+    from homecloud.proxmox.client import ProxmoxClient
+
+    class _Ready(_FakeProxmox):
+        def guest_run(self, vmid, command, timeout=30):
+            self.polls += 1
+            return {"exitcode": 0, "out": "", "err": ""}
+
+    ready = _Ready()
+    ProxmoxClient.wait_for_guest_file(ready, 8001, "/marker", timeout=10)
+    assert ready.polls == 1
 
 
 # ---------------------------------------------------------------------------

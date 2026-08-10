@@ -358,9 +358,13 @@ def build_custom_image(image_id: str) -> dict:
         job_store.start(job["id"])
         try:
             result = ImageBuilder().build_custom_image(
-                image_id, log=job_store.logger(job["id"])
+                image_id,
+                log=job_store.logger(job["id"]),
+                cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
             )
             job_store.complete(job["id"], result)
+        except JobCancelled as exc:
+            job_store.cancelled(job["id"], str(exc))
         except Exception as exc:
             job_store.fail(job["id"], str(exc))
 

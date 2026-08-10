@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -8,6 +9,7 @@ from datetime import UTC, datetime
 from homecloud.config import settings
 from homecloud.images.cloud_init import render_cloud_init
 from homecloud.images.registry import get_image
+from homecloud.jobs import JobCancelled
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.state import (
     get_built_template,
@@ -22,6 +24,25 @@ LogFn = Callable[[str, str], None]
 
 def _noop_log(_level: str, _message: str) -> None:
     pass
+
+
+def _cloud_init_error_detail(status_output: str) -> str:
+    """Turn `cloud-init status --long` output into one actionable sentence."""
+    detail = status_output.split("detail:", 1)[-1].strip()
+
+    if "package-update-upgrade-install" in status_output:
+        # cloud-init installs the whole `packages:` list in a single call, so
+        # one name that does not exist on this distro fails all of them.
+        names = re.findall(r"'install',\s*(.+?)\]", status_output)
+        listed = names[0].replace("'", "") if names else "the requested packages"
+        return (
+            f"Installing packages failed ({listed}). cloud-init installs them in one "
+            "command, so a single name that does not exist on this distribution "
+            "fails all of them — check the names against the base image "
+            "(Debian and Ubuntu use 'neovim', not 'nvim')."
+        )
+
+    return detail[:400] if detail else status_output[:400]
 
 
 class ImageBuilder:
@@ -91,7 +112,13 @@ class ImageBuilder:
             "status": "ready",
         }
 
-    def build_custom_image(self, image_id: str, *, log: LogFn | None = None) -> dict:
+    def build_custom_image(
+        self,
+        image_id: str,
+        *,
+        log: LogFn | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict:
         """Build a user-defined image: cloud image + packages + config files.
 
         Imports (or reuses) the base cloud image template, clones it, bakes the
@@ -106,6 +133,11 @@ class ImageBuilder:
         from homecloud.images.importer import ensure_cloud_image_template  # noqa: PLC0415
 
         emit = log or _noop_log
+
+        def check_cancel() -> None:
+            if cancel_check is not None and cancel_check():
+                raise JobCancelled("Image build cancelled by user")
+
         ssh_keys = get_ssh_public_keys()
         if not ssh_keys:
             raise ValueError("Complete setup and upload your SSH public key before building images")
@@ -136,9 +168,11 @@ class ImageBuilder:
         tpl_name = f"tpl-{image_id}"
 
         try:
+            check_cancel()
             base_template = ensure_cloud_image_template(
                 cloud_image_id, proxmox=self.proxmox, log=emit
             )
+            check_cancel()
             vmid = self.proxmox.next_vmid(start=8000)
 
             emit("info", f"Cloning base template {base_template} → build VM {vmid}")
@@ -172,7 +206,15 @@ class ImageBuilder:
             self.proxmox.wait_for_task(self.proxmox.start(vmid), timeout=120)
 
             emit("info", "Waiting for cloud-init to finish provisioning…")
-            self.proxmox.wait_for_guest_file(vmid, BOOTSTRAP_DONE_MARKER, timeout=1800)
+            self.proxmox.wait_for_guest_file(
+                vmid, BOOTSTRAP_DONE_MARKER, timeout=1800, check_cancel=check_cancel
+            )
+
+            # The marker only proves cloud-init reached the end. A failed module
+            # (a package that does not exist on this distro is the common one)
+            # leaves the image missing what was asked for, so fail loudly here
+            # rather than shipping a template that silently lacks the packages.
+            self._assert_cloud_init_succeeded(vmid, emit)
 
             emit("info", "Preparing VM for templating (cloud-init clean)")
             self.proxmox.prepare_for_template(vmid)
@@ -194,11 +236,14 @@ class ImageBuilder:
                 except Exception:
                     logger.warning("Leftover build VM %s needs manual cleanup", vmid)
 
+            cancelled = isinstance(exc, JobCancelled)
             with session_scope() as session:
                 failed = session.get(CustomImage, image_id)
                 if failed is not None:
-                    failed.status = BuildStatus.FAILED
-                    failed.build_error = str(exc)
+                    # A cancelled build is not a broken definition — put it back
+                    # in draft so it can simply be built again.
+                    failed.status = BuildStatus.DRAFT if cancelled else BuildStatus.FAILED
+                    failed.build_error = None if cancelled else str(exc)
             raise
 
         with session_scope() as session:
@@ -211,6 +256,28 @@ class ImageBuilder:
 
         emit("info", f"Image {image_id} ready — template #{vmid}")
         return {"image_id": image_id, "template_id": vmid, "name": tpl_name, "status": "built"}
+
+    def _assert_cloud_init_succeeded(self, vmid: int, emit: LogFn) -> None:
+        """Raise with cloud-init's own reason when provisioning reported an error."""
+        try:
+            result = self.proxmox.guest_run(
+                vmid, ["cloud-init", "status", "--long"], timeout=120
+            )
+        except Exception:
+            # Can't ask the guest — don't fail a build on a diagnostic hiccup.
+            logger.warning("Could not read cloud-init status on VM %s", vmid, exc_info=True)
+            return
+
+        output = f"{result.get('out', '')}\n{result.get('err', '')}".strip()
+        if "status: error" not in output:
+            emit("info", "cloud-init reported success")
+            return
+
+        detail = _cloud_init_error_detail(output)
+        raise RuntimeError(
+            f"cloud-init failed inside the build VM — the image would be missing "
+            f"what you asked for. {detail}"
+        )
 
     def build_custom(
         self,

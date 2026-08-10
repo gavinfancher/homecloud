@@ -4,6 +4,7 @@ import shlex
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 
@@ -391,10 +392,23 @@ class ProxmoxClient:
             time.sleep(2)
         raise TimeoutError(f"Guest command on VM {vmid} timed out after {timeout}s")
 
-    def wait_for_guest_file(self, vmid: int, path: str, *, timeout: int = 900) -> None:
-        """Block until *path* exists in the guest (used for build-done markers)."""
+    def wait_for_guest_file(
+        self,
+        vmid: int,
+        path: str,
+        *,
+        timeout: int = 900,
+        check_cancel: Callable[[], None] | None = None,
+    ) -> None:
+        """Block until *path* exists in the guest (used for build-done markers).
+
+        *check_cancel* is called on every poll and may raise to abort the wait —
+        without it a build ignores the console's Cancel button until it times out.
+        """
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if check_cancel is not None:
+                check_cancel()
             try:
                 result = self.guest_run(vmid, ["test", "-f", path], timeout=30)
                 if result["exitcode"] == 0:
@@ -402,7 +416,11 @@ class ProxmoxClient:
             except Exception:  # agent not up yet, or command raced with boot
                 pass
             time.sleep(5)
-        raise TimeoutError(f"VM {vmid} never produced {path} — cloud-init may have failed")
+        raise TimeoutError(
+            f"Timed out waiting for {path} on VM {vmid}. The guest agent never "
+            "answered, so cloud-init either failed early or never finished — "
+            f"check the serial console with `qm terminal {vmid}` on the node."
+        )
 
     def wait_for_guest_agent(self, vmid: int, *, timeout: int = 180) -> None:
         import time
