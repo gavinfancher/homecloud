@@ -21,6 +21,30 @@ packages:
   - qemu-guest-agent
 
 write_files:
+  # Identify this VM to DHCP by its MAC address, not by a DUID.
+  #
+  # netplan defaults to `dhcp-identifier: duid`, and the DUID is derived from
+  # /etc/machine-id. Clones that inherit a machine-id therefore present the
+  # SAME identity to the DHCP server, which hands them the SAME lease — two
+  # VMs answering for one IP, the router's ARP entry flapping between two
+  # MACs, and roughly half of all packets delivered to the wrong guest.
+  # Proxmox assigns every VM a unique MAC, so identifying by MAC cannot
+  # collide even if a machine-id somehow survives sealing.
+  #
+  # This lives in its own file because cloud-init rewrites
+  # /etc/netplan/50-cloud-init.yaml on every boot; a 99- drop-in is merged on
+  # top of it and left alone.
+  - path: /etc/netplan/99-dhcp-identifier.yaml
+    permissions: "0600"
+    owner: "root:root"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: true
+            dhcp-identifier: mac
+
   - path: /opt/homecloud/bootstrap.sh
     permissions: "0755"
     content: |

@@ -438,7 +438,22 @@ class ProxmoxClient:
         self._api.nodes(self.node).qemu(vmid).cloudinit.put()
 
     def prepare_for_template(self, vmid: int) -> None:
-        """Reset cloud-init so clones get fresh first-boot config."""
+        """Strip per-machine identity so every clone boots as its own machine.
+
+        Anything left here that is unique-per-host gets copied into every clone
+        and stops being unique. Three classes of state matter:
+
+        * **machine-id** — netplan derives the DHCP DUID from it, so clones that
+          share one are handed the *same* DHCP lease: two VMs on one IP, ARP
+          flapping, ~50% packet loss. ``/var/lib/dbus/machine-id`` is cleared
+          too because ``systemd-machine-id-setup`` will happily re-adopt the old
+          ID from there, which silently undoes truncating ``/etc/machine-id``.
+        * **SSH host keys** — clones that share them are indistinguishable to a
+          client, which defeats host-key verification entirely. cloud-init
+          regenerates them on first boot when they are absent.
+        * **DHCP/network lease state** — stale leases and DUIDs would otherwise
+          be replayed by the clone before it asks for its own.
+        """
         self.wait_for_guest_agent(vmid)
         self.guest_exec(
             vmid,
@@ -447,7 +462,12 @@ class ProxmoxClient:
                 "-c",
                 "cloud-init clean --logs --seed && "
                 "truncate -s 0 /etc/machine-id && "
-                "rm -rf /var/lib/cloud/instances/*",
+                "rm -f /var/lib/dbus/machine-id && "
+                "ln -sf /etc/machine-id /var/lib/dbus/machine-id && "
+                "rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub && "
+                "rm -rf /var/lib/cloud/instances/* && "
+                "rm -f /var/lib/systemd/network/*.lease /var/lib/systemd/random-seed && "
+                "rm -f /var/lib/dhcp/*.leases",
             ],
         )
 
