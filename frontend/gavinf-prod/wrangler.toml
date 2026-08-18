@@ -2,6 +2,7 @@
 # Hostname routing lives in worker.js:
 #   gavinf.com / www / auth / dash  → portal SPA   (../dashboard → dist/portal)
 #   homecloud.gavinf.com            → console SPA  (..           → dist/console)
+#   docs.gavinf.com                 → VitePress docs (../docs    → dist/docs)
 #   proxmox.gavinf.com              → rail shell + passthrough to the tunnel origin
 name = "gavinf-prod"
 account_id = "2750df8a500fb8335c195bad8cccc14a"

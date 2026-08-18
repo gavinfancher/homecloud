@@ -1,0 +1,13 @@
+{
+  "name": "gavinf-docs",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vitepress dev docs --port 4322 --host",
+    "build": "vitepress build docs"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4",
+    "vue": "^3.5.41"
+  }
+}

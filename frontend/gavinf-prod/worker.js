@@ -1,5 +1,7 @@
 // gavinf-prod: one Worker for every gavinf.com site. Hostname routing:
 //   homecloud.gavinf.com → console SPA (assets under /console)
+//   docs.gavinf.com      → VitePress docs site (assets under /docs; static
+//                          multi-page build, no SPA-fallback needed)
 //   proxmox.gavinf.com   → portal-rail shell for navigations, passthrough
 //                          (XHR, assets, WebSocket consoles) to the tunnel origin
 //   everything else      → portal SPA (assets under /portal; the app itself
@@ -7,6 +9,7 @@
 // The proxmox rail below mirrors frontend/src/PortalRail.tsx — keep in sync.
 
 const CONSOLE_HOST = "homecloud.gavinf.com";
+const DOCS_HOST = "docs.gavinf.com";
 const PROXMOX_HOST = "proxmox.gavinf.com";
 
 const PROXMOX_SHELL = `<!doctype html>
@@ -80,6 +83,17 @@ const PROXMOX_SHELL = `<!doctype html>
     </span>
     <span class="portal-rail-label">proxmox</span>
   </a>
+  <a class="portal-rail-item" href="https://docs.gavinf.com" title="docs">
+    <span class="portal-rail-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <path d="M14 2v6h6"/>
+        <path d="M9 13h6"/>
+        <path d="M9 17h6"/>
+      </svg>
+    </span>
+    <span class="portal-rail-label">docs</span>
+  </a>
   <div class="portal-rail-spacer"></div>
   <button type="button" class="portal-rail-item portal-rail-toggle" id="rail-toggle" title="Expand">
     <span class="portal-rail-icon">
@@ -121,6 +135,12 @@ export default {
         });
       }
       return fetch(request);
+    }
+
+    if (url.hostname === DOCS_HOST) {
+      const assetUrl = new URL(url);
+      assetUrl.pathname = `/docs${url.pathname}`;
+      return env.ASSETS.fetch(new Request(assetUrl, request));
     }
 
     const app = url.hostname === CONSOLE_HOST ? "console" : "portal";
