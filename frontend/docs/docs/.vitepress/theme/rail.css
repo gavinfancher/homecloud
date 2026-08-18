@@ -127,8 +127,9 @@ body.rail-open {
 }
 
 .VPLocalNav {
-	left: var(--rail-w);
-	transition: left 0.16s ease;
+	padding-left: var(--rail-w) !important;
+	box-sizing: border-box;
+	transition: padding-left 0.16s ease;
 }
 
 .VPNavScreen {
