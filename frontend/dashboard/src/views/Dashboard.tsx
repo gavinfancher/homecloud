@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { UserButton } from '@clerk/react'
-import { IconCloud, IconCloudMark, IconHypervisor } from '../Icons'
+import { IconCloud, IconCloudMark, IconDocs, IconHypervisor } from '../Icons'
 
 type Service = {
   id: string
@@ -26,6 +26,14 @@ const SERVICES: Service[] = [
     desc: 'Proxmox hypervisor, VMs & cluster management',
     href: 'https://proxmox.gavinf.com',
     icon: <IconHypervisor />,
+    live: true,
+  },
+  {
+    id: 'docs',
+    name: 'docs',
+    desc: 'Cloudflare, Infisical, AWS — written in Markdown',
+    href: 'https://docs.gavinf.com',
+    icon: <IconDocs />,
     live: true,
   },
 ]

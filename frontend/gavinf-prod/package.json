@@ -2,6 +2,6 @@
   "name": "gavinf-prod",
   "private": true,
   "scripts": {
-    "build": "npm ci --prefix .. && npm run build --prefix .. && npm ci --prefix ../dashboard && npm run build --prefix ../dashboard && rm -rf dist && mkdir dist && cp -R ../dist dist/console && cp -R ../dashboard/dist dist/portal"
+    "build": "npm ci --prefix .. && npm run build --prefix .. && npm ci --prefix ../dashboard && npm run build --prefix ../dashboard && npm ci --prefix ../docs && npm run build --prefix ../docs && rm -rf dist && mkdir dist && cp -R ../dist dist/console && cp -R ../dashboard/dist dist/portal && cp -R ../docs/docs/.vitepress/dist dist/docs"
   }
 }

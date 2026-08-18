@@ -1,0 +1,139 @@
+/* gavinf rail — matches .portal-rail in frontend/src/App.css, retokenized
+   onto the vp-c-* variables set in gavinf.css. */
+
+:root {
+	--rail-w: 56px;
+}
+
+body.rail-open {
+	--rail-w: 220px;
+}
+
+.portal-rail {
+	position: fixed;
+	top: 0;
+	left: 0;
+	bottom: 0;
+	z-index: 1000;
+	width: var(--rail-w);
+	overflow: hidden;
+	background: var(--vp-c-bg-alt);
+	border-right: 1px solid var(--vp-c-divider);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 10px 11px;
+	box-sizing: border-box;
+	transition: width 0.16s ease;
+	font-family: var(--vp-font-family-base);
+}
+
+.portal-rail-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-shrink: 0;
+	height: 38px;
+	padding: 0 2px;
+	border-radius: 7px;
+	color: var(--vp-c-text-2);
+	text-decoration: none;
+	white-space: nowrap;
+	font-size: 13.5px;
+	font-weight: 600;
+}
+
+.portal-rail-item:hover,
+.portal-rail-item.active {
+	background: var(--vp-c-bg-elv);
+	color: var(--vp-c-text-1);
+}
+
+.portal-rail-icon {
+	width: 30px;
+	height: 30px;
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.portal-rail-mark {
+	background: var(--hc-accent-soft);
+	border-radius: 7px;
+}
+
+.portal-rail-brand {
+	height: 42px;
+	color: var(--vp-c-text-1);
+	font-size: 15px;
+	margin-bottom: 6px;
+}
+
+.portal-rail-label {
+	opacity: 0;
+	transition: opacity 0.12s ease;
+}
+
+.portal-rail.open .portal-rail-label {
+	opacity: 1;
+}
+
+.portal-rail-sep {
+	height: 1px;
+	flex-shrink: 0;
+	background: var(--vp-c-divider);
+	margin: 4px 2px 8px;
+}
+
+.portal-rail-spacer {
+	flex: 1;
+}
+
+.portal-rail-toggle {
+	background: none;
+	border: 0;
+	cursor: pointer;
+	font: inherit;
+	width: 100%;
+	text-align: left;
+}
+
+/* Shift VitePress's own chrome right so nothing sits under the rail. */
+.VPNav {
+	padding-left: var(--rail-w);
+	transition: padding-left 0.16s ease;
+	box-sizing: border-box;
+}
+
+.VPSidebar {
+	left: var(--rail-w) !important;
+	transition: left 0.16s ease;
+}
+
+.VPContent {
+	transition: padding-left 0.16s ease;
+}
+
+@media (min-width: 960px) {
+	.VPContent.has-sidebar {
+		padding-left: calc(var(--vp-sidebar-width) + var(--rail-w)) !important;
+	}
+
+	.VPContent:not(.has-sidebar) {
+		padding-left: var(--rail-w);
+	}
+}
+
+.VPLocalNav {
+	left: var(--rail-w);
+	transition: left 0.16s ease;
+}
+
+.VPNavScreen {
+	padding-left: var(--rail-w);
+}
+
+.VPNavBar:not(.has-sidebar) .divider {
+	padding-left: var(--rail-w) !important;
+}
