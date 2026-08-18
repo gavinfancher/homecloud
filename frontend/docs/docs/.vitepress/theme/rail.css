@@ -111,17 +111,18 @@ body.rail-open {
 	transition: left 0.16s ease;
 }
 
+/* Reserve rail-width space at every viewport size — below 960px the sidebar
+   itself becomes an off-canvas drawer instead of a persistent column, so
+   only the rail (always visible) needs accounting for here. */
 .VPContent {
+	padding-left: var(--rail-w) !important;
 	transition: padding-left 0.16s ease;
+	box-sizing: border-box;
 }
 
 @media (min-width: 960px) {
 	.VPContent.has-sidebar {
 		padding-left: calc(var(--vp-sidebar-width) + var(--rail-w)) !important;
-	}
-
-	.VPContent:not(.has-sidebar) {
-		padding-left: var(--rail-w);
 	}
 }
 
