@@ -438,7 +438,14 @@ class ProxmoxClient:
         self._api.nodes(self.node).qemu(vmid).cloudinit.put()
 
     def prepare_for_template(self, vmid: int) -> None:
-        """Reset cloud-init so clones get fresh first-boot config."""
+        """Reset cloud-init so clones get fresh first-boot config.
+
+        Also clears /etc/hostname: cloud-init brings the network up (and
+        fires the clone's first DHCP request) before its hostname module
+        runs, so without this every clone's first lease is requested under
+        the template's own hostname — which a DHCP server can key a static
+        reservation off of, sending every fresh clone to the same IP.
+        """
         self.wait_for_guest_agent(vmid)
         self.guest_exec(
             vmid,
@@ -447,6 +454,8 @@ class ProxmoxClient:
                 "-c",
                 "cloud-init clean --logs --seed && "
                 "truncate -s 0 /etc/machine-id && "
+                "truncate -s 0 /etc/hostname && "
+                "sed -i '/127\\.0\\.1\\.1/d' /etc/hosts && "
                 "rm -rf /var/lib/cloud/instances/*",
             ],
         )
