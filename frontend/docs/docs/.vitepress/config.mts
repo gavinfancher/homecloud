@@ -23,6 +23,12 @@ export default defineConfig({
           },
           { text: 'Infisical', link: '/infisical/' },
           {
+            text: 'Proxmox',
+            link: '/proxmox/',
+            collapsed: false,
+            items: [{ text: 'VM status API', link: '/proxmox/vm-status' }],
+          },
+          {
             text: 'AWS',
             link: '/aws/',
             collapsed: false,
