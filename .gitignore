@@ -2,9 +2,11 @@
 .env
 *.local
 
-# SSH keys (mount at runtime; never commit private keys)
+# SSH: keys and the real config are runtime-only; ssh/config.example is
+# tracked. Never commit private keys or real hostnames.
 ssh/*-key
 ssh/*-key.pub
+ssh/config
 
 # Python
 .venv/

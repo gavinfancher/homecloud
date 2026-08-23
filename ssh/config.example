@@ -1,0 +1,18 @@
+# Copy to ssh/config and fill in your own hosts.
+# Mounted read-only into the controller container at /mnt/ssh (see
+# infra/docker/docker-compose.yml); the entrypoint copies it to /root/.ssh.
+# ssh/config is gitignored — only this example is tracked.
+
+# Proxmox node. Hostname is its Tailscale IP (100.x range, tailnet-only) or
+# LAN IP. Must match PROXMOX_SSH_HOST in .env.
+Host pve
+  Hostname 100.x.y.z
+  User root
+  IdentityFile /root/.ssh/macbook-pro-key
+  StrictHostKeyChecking accept-new
+
+# Control node VM (optional — for `ssh homecloud` from your laptop)
+Host homecloud
+  Hostname 100.a.b.c
+  User ubuntu
+  StrictHostKeyChecking accept-new

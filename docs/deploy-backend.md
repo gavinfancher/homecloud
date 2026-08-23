@@ -133,7 +133,8 @@ API_PUBLIC_HOST=api.homecloud.dev
 OWNER_USERNAME=gavin
 ```
 
-Place Proxmox SSH keys in `ssh/` (gitignored). `ssh/config` should point `pve` at the
+Place Proxmox SSH keys in `ssh/` (gitignored). Copy `ssh/config.example` to
+`ssh/config` (also gitignored) and point `pve` at the
 Proxmox host tailnet IP.
 
 ### SSH keys for controller → Proxmox
