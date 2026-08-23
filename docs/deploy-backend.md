@@ -18,8 +18,9 @@ api.homecloud.dev  → Tunnel → Caddy → controller:8080 (this stack)
 | `cloudflared` | Cloudflare Tunnel connector |
 | `coredns` | Split DNS for `*.homecloud.dev` on the tailnet |
 
-**Your setup:** Proxmox host `pve-root` (100.106.79.65), control node VM `homecloud`
-(100.74.161.39).
+**Your setup:** Proxmox host `pve` (`100.x.y.z`), control node VM `homecloud`
+(`100.a.b.c`). Both addresses are Tailscale IPs — substitute your own; they are
+reachable only from the tailnet.
 
 ## CI/CD (recommended)
 
@@ -41,7 +42,7 @@ queues the job; the runner on `homecloud` picks it up and runs `~/homecloud/scri
 #### One-time: install the runner on homecloud
 
 ```bash
-ssh ubuntu@100.74.161.39
+ssh ubuntu@100.a.b.c
 cd ~/homecloud && git pull   # get install-github-runner.sh
 
 # GitHub → repo Settings → Actions → Runners → New self-hosted runner → Linux x64
@@ -81,7 +82,7 @@ OAuth client with `tag:ci`, `grants` for port 22, and secrets `TAILSCALE_OAUTH_*
 SSH to the control node:
 
 ```bash
-ssh ubuntu@100.74.161.39
+ssh ubuntu@100.a.b.c
 ```
 
 Clone and preserve existing state (if migrating from a copied tree):
@@ -93,7 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/gavinfancher/homecloud/main/scripts
 Or from a laptop with the repo:
 
 ```bash
-ssh ubuntu@100.74.161.39 'bash -s' < scripts/bootstrap-control-node.sh
+ssh ubuntu@100.a.b.c 'bash -s' < scripts/bootstrap-control-node.sh
 ```
 
 This backs up `~/homecloud` → `~/homecloud.bak.<timestamp>`, clones `main`, restores
@@ -105,7 +106,7 @@ Copy `.env.example` and fill all production values. Critical entries:
 
 ```bash
 # Proxmox + Tailscale (VM provisioning)
-PROXMOX_HOST=100.106.79.65
+PROXMOX_HOST=100.x.y.z
 PROXMOX_SSH_HOST=pve
 # ... token, storage, template id ...
 
@@ -119,7 +120,7 @@ CLOUDFLARE_TUNNEL_CNAME=<uuid>.cfargotunnel.com
 # Compose integration (required in production)
 CADDY_RELOAD_CMD=http://caddy:2019
 CADDY_FORWARD_AUTH_UPSTREAM=controller:8080
-CONTROL_NODE_TAILSCALE_IP=100.74.161.39
+CONTROL_NODE_TAILSCALE_IP=100.a.b.c
 
 # Clerk (required for production auth)
 CLERK_JWKS_URL=https://<slug>.clerk.accounts.dev/.well-known/jwks.json
@@ -155,7 +156,7 @@ cd ~/homecloud
 **From your laptop:**
 
 ```bash
-CONTROL_NODE_HOST=100.74.161.39 make deploy-remote
+CONTROL_NODE_HOST=100.a.b.c make deploy-remote
 ```
 
 **Automatic:** any merge to `main` (after the self-hosted runner is installed).
@@ -193,7 +194,7 @@ sudo killall -HUP mDNSResponder
 Then verify:
 
 ```bash
-dig @100.74.161.39 wishly.gavin.homecloud.dev +short   # tailnet IP from CoreDNS
+dig @100.a.b.c wishly.gavin.homecloud.dev +short   # tailnet IP from CoreDNS
 dscacheutil -q host -a name wishly.gavin.homecloud.dev  # what SSH uses
 ```
 
@@ -209,8 +210,8 @@ The Corefile uses **fallthrough** so unknown names forward to public resolvers (
 Verify on the tailnet:
 
 ```bash
-dig @100.74.161.39 api.homecloud.dev    # should return Cloudflare IPs, not NXDOMAIN
-dig @100.74.161.39 dagster.gavin.homecloud.dev  # instance tailnet IP
+dig @100.a.b.c api.homecloud.dev    # should return Cloudflare IPs, not NXDOMAIN
+dig @100.a.b.c dagster.gavin.homecloud.dev  # instance tailnet IP
 ```
 
 ### CoreDNS won't start (port 53)

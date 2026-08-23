@@ -22,7 +22,7 @@ state model, and the key technical decisions.
                                                             └───────────────────────────┬────────────────────────────────┘
                                                                                          │ Proxmox API + SSH
                                                                                          ▼
-                                                       ┌──────────────── Proxmox host (pve-root) ────────────────┐
+                                                       ┌──────────────── Proxmox host (pve) ────────────────┐
                                                        │   instance "app"   instance "db"   ...   (join tailnet)  │
                                                        └──────────────────────────────────────────────────────────┘
 ```
