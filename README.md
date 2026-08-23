@@ -10,10 +10,10 @@ ingress, and a web console, all driven by a single FastAPI service.
 
 ```
                         ┌──────────────── Cloudflare edge ────────────────┐
-   you (anywhere) ──►   │  gavinf-prod Worker          Tunnel (cloudflared)│
-                        │  ├─ dash / auth (portal SPA)   │                 │
-                        │  ├─ homecloud (console SPA)    ▼                 │
-                        │  └─ proxmox (shell+passthru) Caddy ── controller │
+   you (anywhere) ──►   │  gavinf-homecloud Worker     Tunnel (cloudflared)│
+                        │  └─ homecloud (console SPA)    ▼                 │
+                        │     (gavinf.com + proxmox live  Caddy ── controller│
+                        │      in the gavinf repo)         │                │
                         └──────────────────────────────│──────────────────┘
                                                        │ control node VM
    you (on tailnet) ──► CoreDNS (split DNS) ───────────┤  docker compose:
@@ -87,10 +87,8 @@ src/homecloud/       Controller (FastAPI)
   publish.py         Publish flow (Caddy + DNS + state)
   auth.py            Clerk JWT verification / forward-auth target
   jobs.py, state.py  Async job runner, persistent state
-frontend/            Console SPA (homecloud.gavinf.com)
-  dashboard/         Portal SPA (gavinf.com / auth / dash)
-  gavinf-prod/       Single Cloudflare Worker: hostname-routes both SPAs
-                     + the Proxmox shell (see docs/deploy-web.md)
+frontend/            Console SPA (homecloud.gavinf.com), deployed as the
+                     gavinf-homecloud Worker (see docs/deploy-web.md)
 infra/
   docker/            Dockerfile + compose stack (controller, caddy,
                      cloudflared, coredns)
@@ -159,9 +157,11 @@ A few minutes later: `ssh ubuntu@dagster` over the tailnet, private DNS at
 - **Backend** — push to `main` → GitHub Actions on a self-hosted runner on the
   control node → rebuild + restart the compose stack
   ([docs/deploy-backend.md](docs/deploy-backend.md)).
-- **Web** — push to `main` → Cloudflare Workers Git builds both SPAs and
-  deploys the single `gavinf-prod` Worker
-  ([docs/deploy-web.md](docs/deploy-web.md)).
+- **Web** — push to `main` → Cloudflare Workers Git builds the console and
+  deploys the `gavinf-homecloud` Worker
+  ([docs/deploy-web.md](docs/deploy-web.md)). The portal at `gavinf.com` and
+  the docs at `docs.gavinf.com` are separate Workers in the `gavinf` and
+  `mydocs` repos.
 
 ## Design history
 

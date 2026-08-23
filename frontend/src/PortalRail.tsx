@@ -1,5 +1,5 @@
 // Shared portal rail — an identical plain-HTML copy lives in the proxmox
-// shell inside frontend/gavinf-prod/worker.js. Keep the two in sync when
+// shell inside the gavinf repo's worker.js. Keep the two in sync when
 // changing anything here. (dash.gavinf.com uses its own header instead.)
 import { useEffect, useState, type ReactNode } from 'react'
 

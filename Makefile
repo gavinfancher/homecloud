@@ -34,9 +34,11 @@ dev-web:
 	npm --prefix frontend run dev
 
 # Backup web deploy — the primary path is Cloudflare Workers Git on push to main.
+# Deploys the console only (gavinf-homecloud); gavinf.com and docs.gavinf.com
+# are separate Workers in the gavinf and mydocs repos.
 deploy-web:
-	npm --prefix frontend/gavinf-prod run build
-	npx --prefix frontend/gavinf-prod wrangler deploy -c frontend/gavinf-prod/wrangler.toml
+	npm --prefix frontend run build
+	npx --prefix frontend wrangler deploy -c frontend/wrangler.json
 
 deploy-stack:
 	./scripts/deploy-stack.sh

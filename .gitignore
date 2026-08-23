@@ -21,14 +21,6 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/.wrangler/
-frontend/dashboard/node_modules/
-frontend/dashboard/dist/
-frontend/gavinf-prod/node_modules/
-frontend/gavinf-prod/dist/
-frontend/gavinf-prod/.wrangler/
-frontend/docs/node_modules/
-frontend/docs/docs/.vitepress/dist/
-frontend/docs/docs/.vitepress/cache/
 
 # Agent tooling artifacts (not project code)
 .agents/
