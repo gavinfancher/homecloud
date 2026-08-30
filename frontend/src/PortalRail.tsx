@@ -1,10 +1,10 @@
 // Shared portal rail — plain-HTML copies live in the shell that gavinf-dash's
-// worker.js wraps around proxmox and unifi, and in gavinf-docs as Rail.astro.
+// worker.js wraps around proxmox, and in gavinf-docs as Rail.astro.
 // Keep all three in sync when changing anything here. (dash.gavinf.com uses
 // its own header instead.)
 import { useEffect, useState, type ReactNode } from 'react'
 
-type Site = 'dashboard' | 'homecloud' | 'proxmox' | 'unifi' | 'docs'
+type Site = 'dashboard' | 'homecloud' | 'proxmox' | 'docs'
 
 const OPEN_KEY = 'portal-rail-open'
 
@@ -29,18 +29,6 @@ const SITES: { id: Site; label: string; href: string; icon: ReactNode }[] = [
         <rect x="14" y="3" width="7" height="7" rx="1" />
         <rect x="3" y="14" width="7" height="7" rx="1" />
         <rect x="14" y="14" width="7" height="7" rx="1" />
-      </svg>
-    ),
-  },
-  {
-    id: 'unifi',
-    label: 'unifi',
-    href: 'https://unifi.gavinf.com',
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3.5 9.5a12 12 0 0 1 17 0" />
-        <path d="M7 13a7.5 7.5 0 0 1 10 0" />
-        <path d="M10.5 16.5a2.5 2.5 0 0 1 3 0" />
       </svg>
     ),
   },
