@@ -21,6 +21,18 @@ packages:
   - qemu-guest-agent
 
 write_files:
+  # Key the DHCP client identifier off the MAC rather than /etc/machine-id, so
+  # clones of this template can never collide on a lease. See the matching note
+  # in deploy.yaml.j2 and ProxmoxClient.prepare_for_template.
+  - path: /etc/netplan/99-homecloud-dhcp-identifier.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp-identifier: mac
+
   - path: /opt/homecloud/bootstrap.sh
     permissions: "0755"
     content: |

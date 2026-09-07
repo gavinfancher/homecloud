@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shlex
 import subprocess
 import threading
@@ -8,10 +9,11 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 
-import requests
 from proxmoxer import ProxmoxAPI
 
 from homecloud.config import settings
+
+logger = logging.getLogger(__name__)
 
 _VM_LIST_CACHE_TTL = 4.0
 
@@ -163,36 +165,31 @@ class ProxmoxClient:
             (snippets_dir / filename).write_text(content)
             return f"local:snippets/{filename}"
 
-        if settings.proxmox_ssh_host:
-            path = f"{settings.proxmox_snippets_dir}/{filename}"
-            subprocess.run(
-                ["ssh", settings.proxmox_ssh_host, f"cat > {path}"],
-                input=content,
-                text=True,
-                check=True,
+        # Snippets can only be written on the node itself: the storage upload
+        # API accepts content=iso|vztmpl|import and rejects "snippets".
+        if not settings.proxmox_ssh_host:
+            raise RuntimeError(
+                "PROXMOX_SSH_HOST is not configured - writing cloud-init snippets "
+                "requires SSH access to the Proxmox node"
             )
-            return f"local:snippets/{filename}"
 
-        # Fallback: Proxmox upload API
-        url = (
-            f"https://{settings.proxmox_host}:8006/api2/json/"
-            f"nodes/{self.node}/storage/{storage}/upload"
+        path = f"{settings.proxmox_snippets_dir}/{filename}"
+        result = subprocess.run(
+            ["ssh", settings.proxmox_ssh_host, f"cat > {shlex.quote(path)}"],
+            input=content,
+            text=True,
+            capture_output=True,
         )
-        auth = (
-            f"PVEAPIToken={settings.proxmox_user}!"
-            f"{settings.proxmox_token_name}={settings.proxmox_token_value}"
-        )
-        files = {"data": (filename, content.encode())}
-        data = {"content": "snippets", "filename": filename}
-        resp = requests.post(
-            url,
-            headers={"Authorization": auth},
-            files=files,
-            data=data,
-            verify=settings.proxmox_verify_ssl,
-            timeout=60,
-        )
-        resp.raise_for_status()
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"exit {result.returncode}"
+            logger.error(
+                "Snippet write to %s:%s failed: %s", settings.proxmox_ssh_host, path, detail
+            )
+            raise RuntimeError(
+                f"Could not write cloud-init snippet to {settings.proxmox_ssh_host}:{path} "
+                f"({detail}). Check that ssh/config defines host "
+                f"'{settings.proxmox_ssh_host}' and that its key is present in /root/.ssh."
+            )
         return f"local:snippets/{filename}"
 
     def set_cloudinit(
@@ -438,27 +435,49 @@ class ProxmoxClient:
         self._api.nodes(self.node).qemu(vmid).cloudinit.put()
 
     def prepare_for_template(self, vmid: int) -> None:
-        """Reset cloud-init so clones get fresh first-boot config.
+        """Strip per-machine identity so clones boot as distinct hosts.
 
-        Also clears /etc/hostname: cloud-init brings the network up (and
-        fires the clone's first DHCP request) before its hostname module
-        runs, so without this every clone's first lease is requested under
-        the template's own hostname — which a DHCP server can key a static
-        reservation off of, sending every fresh clone to the same IP.
+        Every file cleared here is an identity a clone must not inherit:
+
+        - ``/etc/machine-id`` is the big one.  systemd-networkd derives both the
+          DHCPv4 IAID and the DUID from it, so clones that share a machine-id
+          send a byte-identical DHCP client identifier and the DHCP server
+          hands them all the *same lease* — several VMs on one IP.
+        - ``/etc/hostname`` because cloud-init brings the network up (and fires
+          the clone's first DHCP request) before its hostname module runs.
+        - SSH host keys and Tailscale node state are cleared defensively;
+          cloud-init already regenerates host keys per instance, but a template
+          should not ship identity a clone might reuse.
+
+        The command is run to completion and followed by ``sync``: the caller
+        hard-stops the VM immediately afterwards, and without an explicit
+        flush the truncations would still be in the page cache when the power
+        is cut, leaving the template with its identity intact.
         """
         self.wait_for_guest_agent(vmid)
-        self.guest_exec(
+        result = self.guest_run(
             vmid,
             [
                 "bash",
                 "-c",
                 "cloud-init clean --logs --seed && "
                 "truncate -s 0 /etc/machine-id && "
+                "rm -f /var/lib/dbus/machine-id && "
                 "truncate -s 0 /etc/hostname && "
                 "sed -i '/127\\.0\\.1\\.1/d' /etc/hosts && "
-                "rm -rf /var/lib/cloud/instances/*",
+                "rm -rf /var/lib/cloud/instances/* && "
+                "rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub && "
+                "rm -rf /var/lib/tailscale/* && "
+                "rm -rf /var/lib/systemd/network/ /run/systemd/netif/leases/* && "
+                "sync",
             ],
         )
+        if result["exitcode"] != 0:
+            raise RuntimeError(
+                f"Template sysprep failed on VM {vmid} (exit {result['exitcode']}): "
+                f"{result['err'].strip() or result['out'].strip()}. Refusing to convert "
+                f"a VM that still carries its machine-id to a template."
+            )
 
     def wait_for_vm_ip(self, vmid: int, *, timeout: int = 180) -> str:
         """Wait for DHCP IP via QEMU guest agent."""

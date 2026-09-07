@@ -10,6 +10,45 @@ ssh_authorized_keys:
 {% endif %}
 
 write_files:
+  # systemd-networkd derives the DHCP IAID and DUID from /etc/machine-id, so
+  # any clone that inherits the template's machine-id asks for its lease under
+  # a byte-identical client identifier and the DHCP server keeps handing back
+  # the same address. Keying the identifier off the MAC — which Proxmox already
+  # makes unique per clone — breaks that tie even on a template built before
+  # the machine-id sysprep was fixed.
+  - path: /etc/netplan/99-homecloud-dhcp-identifier.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp-identifier: mac
+
+  - path: /opt/homecloud/reset-identity.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Give this clone its own machine-id, then re-request a DHCP lease under
+      # the MAC-based client identifier. Runs once, on first boot.
+      set -euo pipefail
+
+      rm -f /etc/machine-id /var/lib/dbus/machine-id
+      systemd-machine-id-setup
+      if [ -d /var/lib/dbus ]; then
+        ln -sf /etc/machine-id /var/lib/dbus/machine-id
+      fi
+
+      netplan apply
+
+      # Wait for the new lease to land before anything downstream needs the network.
+      for _ in $(seq 1 30); do
+        if ip -4 -o addr show dev eth0 scope global | grep -q .; then
+          break
+        fi
+        sleep 1
+      done
+
   - path: /opt/homecloud/join-tailscale.sh
     permissions: "0755"
     content: |
@@ -22,6 +61,7 @@ write_files:
       tailscale set --auto-update=true
 
 runcmd:
+  - [bash, /opt/homecloud/reset-identity.sh]
   - [bash, /opt/homecloud/join-tailscale.sh]
 
 final_message: "homecloud VM {{ hostname }} joined tailnet"
