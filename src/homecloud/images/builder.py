@@ -19,6 +19,8 @@ from homecloud.state import (
 )
 
 logger = logging.getLogger(__name__)
+BASE_BOOTSTRAP_DONE_MARKER = "/var/lib/homecloud/bootstrap.done"
+
 LogFn = Callable[[str, str], None]
 
 
@@ -91,8 +93,13 @@ class ImageBuilder:
         start_task = self.proxmox.start(vmid)
         self.proxmox.wait_for_task(start_task, timeout=120)
 
-        emit("info", "Waiting for cloud-init bootstrap (~2 min)…")
-        time.sleep(120)
+        # A fixed sleep races the bootstrap: docker, uv and tailscale can take
+        # well over two minutes, and sysprepping mid-install ships a template
+        # that silently lacks them. Wait for the marker the bootstrap writes,
+        # then make cloud-init confirm it actually succeeded.
+        emit("info", "Waiting for cloud-init bootstrap…")
+        self.proxmox.wait_for_guest_file(vmid, BASE_BOOTSTRAP_DONE_MARKER, timeout=1800)
+        self._assert_cloud_init_succeeded(vmid, emit)
 
         emit("info", "Preparing VM for templating (cloud-init clean)")
         self.proxmox.prepare_for_template(vmid)
@@ -311,8 +318,6 @@ class ImageBuilder:
 
         start_task = self.proxmox.start(vmid)
         self.proxmox.wait_for_task(start_task, timeout=120)
-
-        import time
 
         time.sleep(60)
 

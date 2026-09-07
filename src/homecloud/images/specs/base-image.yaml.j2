@@ -57,6 +57,7 @@ write_files:
       curl -fsSL https://tailscale.com/install.sh | sh
       tailscale set --operator={{ ssh_user }} || true
 
+      mkdir -p /var/lib/homecloud
       touch /var/lib/homecloud/bootstrap.done
 
 runcmd:
