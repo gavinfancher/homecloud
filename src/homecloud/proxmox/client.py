@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import logging
 import shlex
 import subprocess
@@ -16,6 +17,14 @@ from homecloud.config import settings
 logger = logging.getLogger(__name__)
 
 _VM_LIST_CACHE_TTL = 4.0
+_LAN_IP_CACHE_TTL = 60.0
+
+# Interfaces that never carry the VM's LAN address: the Tailscale tunnel and
+# the bridges container runtimes hang off.  Loopback is matched exactly, so a
+# real NIC whose name merely starts with "lo" is not skipped.
+_NON_LAN_IFACES = ("tailscale", "docker", "br-", "veth", "virbr", "cni", "flannel")
+# Tailscale hands out CGNAT addresses; those are the tailnet IP, not the LAN one.
+_TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
 
 class ProxmoxClient:
@@ -23,6 +32,10 @@ class ProxmoxClient:
 
     _vm_list_cache: tuple[float, list[dict]] | None = None
     _vm_list_cache_lock = threading.Lock()
+    # vmid -> (fetched_at, ip or None).  Negative results are cached too, so a
+    # VM without a responding guest agent is not re-probed on every dashboard poll.
+    _lan_ip_cache: dict[int, tuple[float, str | None]] = {}
+    _lan_ip_cache_lock = threading.Lock()
 
     def __init__(self) -> None:
         self._api = ProxmoxAPI(
@@ -58,6 +71,14 @@ class ProxmoxClient:
     def invalidate_vm_list_cache() -> None:
         with ProxmoxClient._vm_list_cache_lock:
             ProxmoxClient._vm_list_cache = None
+
+    @staticmethod
+    def invalidate_lan_ip_cache(vmid: int | None = None) -> None:
+        with ProxmoxClient._lan_ip_cache_lock:
+            if vmid is None:
+                ProxmoxClient._lan_ip_cache.clear()
+            else:
+                ProxmoxClient._lan_ip_cache.pop(vmid, None)
 
     def list_vms(self, *, use_cache: bool = True) -> list[dict]:
         now = time.time()
@@ -479,26 +500,72 @@ class ProxmoxClient:
                 f"a VM that still carries its machine-id to a template."
             )
 
-    def wait_for_vm_ip(self, vmid: int, *, timeout: int = 180) -> str:
-        """Wait for DHCP IP via QEMU guest agent."""
-        import time
+    @staticmethod
+    def _is_lan_ipv4(ip: str) -> bool:
+        """True for an address on the home LAN — not loopback, tailnet, or link-local."""
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        if addr.version != 4:
+            return False
+        if addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+            return False
+        return addr not in _TAILSCALE_CGNAT
 
+    @staticmethod
+    def _lan_ip_from_interfaces(interfaces) -> str | None:
+        """Pick the LAN IPv4 out of a guest-agent ``network-get-interfaces`` payload."""
+        if isinstance(interfaces, dict) and "result" in interfaces:
+            interfaces = interfaces["result"]
+        for iface in interfaces or []:
+            name = (iface.get("name") or "").lower()
+            if name == "lo" or name.startswith(_NON_LAN_IFACES):
+                continue
+            for addr in iface.get("ip-addresses", []):
+                if addr.get("ip-address-type") != "ipv4":
+                    continue
+                ip = addr.get("ip-address", "")
+                if ProxmoxClient._is_lan_ipv4(ip):
+                    return ip
+        return None
+
+    def _query_lan_ip(self, vmid: int) -> str | None:
+        interfaces = self._api.nodes(self.node).qemu(vmid).agent("network-get-interfaces").get()
+        return self._lan_ip_from_interfaces(interfaces)
+
+    def get_lan_ip(self, vmid: int, *, use_cache: bool = True) -> str | None:
+        """LAN address of a running VM, or None when the guest agent can't answer.
+
+        Cached (including misses) for ``_LAN_IP_CACHE_TTL`` so listing instances
+        does not hit the guest agent of every VM on each poll.
+        """
+        now = time.time()
+        if use_cache:
+            with ProxmoxClient._lan_ip_cache_lock:
+                cached = ProxmoxClient._lan_ip_cache.get(vmid)
+                if cached and now - cached[0] < _LAN_IP_CACHE_TTL:
+                    return cached[1]
+        try:
+            ip = self._query_lan_ip(vmid)
+        except Exception:  # noqa: BLE001 — agent down or VM stopped; not an error here
+            logger.debug("LAN IP lookup failed for VM %s", vmid, exc_info=True)
+            ip = None
+        with ProxmoxClient._lan_ip_cache_lock:
+            ProxmoxClient._lan_ip_cache[vmid] = (now, ip)
+        return ip
+
+    def wait_for_vm_ip(self, vmid: int, *, timeout: int = 180) -> str:
+        """Wait for the DHCP-assigned LAN IP via the QEMU guest agent."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
                 self.wait_for_guest_agent(vmid, timeout=10)
-                interfaces = (
-                    self._api.nodes(self.node).qemu(vmid).agent("network-get-interfaces").get()
-                )
-                if isinstance(interfaces, dict) and "result" in interfaces:
-                    interfaces = interfaces["result"]
-                for iface in interfaces or []:
-                    for addr in iface.get("ip-addresses", []):
-                        if addr.get("ip-address-type") != "ipv4":
-                            continue
-                        ip = addr.get("ip-address", "")
-                        if ip and not ip.startswith("127."):
-                            return ip
+                ip = self._query_lan_ip(vmid)
+                if ip:
+                    with ProxmoxClient._lan_ip_cache_lock:
+                        ProxmoxClient._lan_ip_cache[vmid] = (time.time(), ip)
+                    return ip
             except Exception:
                 pass
             time.sleep(5)

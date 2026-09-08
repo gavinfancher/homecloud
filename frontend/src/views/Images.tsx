@@ -129,7 +129,6 @@ function ImageCard({
         </div>
         <div className="image-titles">
           <h3>{image.name}</h3>
-          <code className="muted">{image.id}</code>
         </div>
         <Pill status={STATUS_TONE[image.status] ?? 'paused'}>
           {STATUS_LABEL[image.status] ?? image.status}

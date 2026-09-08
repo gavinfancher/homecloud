@@ -44,7 +44,7 @@ def _custom_image_template(image_id: str) -> int | None:
 
 
 class VMDeployer:
-    """Deploy VMs: join Tailscale, expose MagicDNS hostname."""
+    """Deploy VMs: join Tailscale, expose the split-DNS hostname and LAN address."""
 
     def __init__(self, proxmox: ProxmoxClient | None = None) -> None:
         self.proxmox = proxmox or ProxmoxClient()
@@ -134,8 +134,14 @@ class VMDeployer:
         tailscale_ip = self._wait_for_tailscale_ip(name, log=emit, cancel_check=cancel_check)
         emit("info", f"Tailscale IP assigned: {tailscale_ip}")
 
-        dns = connection_info(name, tailscale_ip)
-        emit("info", f"MagicDNS: {dns['hostname']}")
+        local_ip = self.proxmox.get_lan_ip(vmid, use_cache=False) or ""
+        if local_ip:
+            emit("info", f"Local IP: {local_ip}")
+        else:
+            emit("warning", "Could not read the LAN address from the guest agent")
+
+        dns = connection_info(name, tailscale_ip, local_ip)
+        emit("info", f"Hostname: {dns['hostname']}")
         ssh_block = ssh_config_block(host_alias=name, hostname=name)
 
         record = {
@@ -143,6 +149,7 @@ class VMDeployer:
             "name": name,
             "ip": tailscale_ip,
             "tailscale_ip": tailscale_ip,
+            "local_ip": local_ip,
             "hostname": dns["hostname"],
             "size_id": size_id,
             "cores": cores,
@@ -170,10 +177,10 @@ class VMDeployer:
             "disk_gb": disk_gb,
             "image_id": image_id,
             "tailscale_ip": tailscale_ip,
+            "local_ip": local_ip,
             "hostname": dns["hostname"],
             "ssh_command": dns["ssh"],
             "ssh_config": ssh_block,
-            "magic_dns": dns["magic_dns"],
         }
 
     def _resize_disk_to_target(self, vmid: int, target_gb: int) -> None:
@@ -227,6 +234,8 @@ class VMManager:
         task = self.proxmox.start(vmid)
         self.proxmox.wait_for_task(task, timeout=120)
         ProxmoxClient.invalidate_vm_list_cache()
+        # A restarted VM can come back on a different DHCP lease.
+        ProxmoxClient.invalidate_lan_ip_cache(vmid)
         return {"vmid": vmid, "status": "running"}
 
     def stop(self, vmid: int) -> dict:
@@ -245,6 +254,8 @@ class VMManager:
         task = self.proxmox.resume(vmid)
         self.proxmox.wait_for_task(task, timeout=120)
         ProxmoxClient.invalidate_vm_list_cache()
+        # A restarted VM can come back on a different DHCP lease.
+        ProxmoxClient.invalidate_lan_ip_cache(vmid)
         return {"vmid": vmid, "status": "running"}
 
     def delete(self, vmid: int, *, name: str | None = None, log: LogFn | None = None) -> dict:
@@ -275,4 +286,6 @@ class VMManager:
         if task:
             self.proxmox.wait_for_task(task, timeout=120)
         ProxmoxClient.invalidate_vm_list_cache()
+        # next_vmid reuses ids — a stale entry would label the next VM wrongly.
+        ProxmoxClient.invalidate_lan_ip_cache(vmid)
         return {"vmid": vmid, "status": "deleted", "tailscale_removed": tailscale_removed}

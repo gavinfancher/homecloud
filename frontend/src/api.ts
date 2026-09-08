@@ -26,8 +26,8 @@ export interface VM {
   disk_gb?: number
   hostname?: string
   private_host?: string
-  magic_dns?: string
   tailscale_ip?: string
+  local_ip?: string
   ip?: string
   ssh?: string
   size_id?: string

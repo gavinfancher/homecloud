@@ -22,19 +22,25 @@ def test_private_fqdn_namespaced_with_username(monkeypatch):
     assert private_fqdn("dagster") == "dagster.gavin.homecloud.dev"
 
 
-def test_connection_info_exposes_private_and_magic(monkeypatch):
+def test_connection_info_exposes_private_host_and_ips(monkeypatch):
     monkeypatch.setattr(publish_module.settings, "owner_username", "gavin")
     monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
     monkeypatch.setattr(publish_module.settings, "vm_ssh_user", "ubuntu")
-    monkeypatch.setattr(
-        "homecloud.dns.names.TailscaleClient.fqdn",
-        lambda _name: "dagster.tailnet.ts.net",
-    )
-    info = connection_info("dagster", "100.1.1.1")
+    info = connection_info("dagster", "100.1.1.1", "192.168.1.42")
     assert info["hostname"] == "dagster.gavin.homecloud.dev"
     assert info["private_host"] == "dagster.gavin.homecloud.dev"
-    assert info["magic_dns"] == "dagster.tailnet.ts.net"
+    assert info["tailscale_ip"] == "100.1.1.1"
+    assert info["local_ip"] == "192.168.1.42"
     assert info["ssh"] == "ssh ubuntu@dagster.gavin.homecloud.dev"
+
+
+def test_connection_info_omits_magic_dns(monkeypatch):
+    """The MagicDNS name is no longer surfaced to the API/UI."""
+    monkeypatch.setattr(publish_module.settings, "owner_username", "gavin")
+    monkeypatch.setattr(publish_module.settings, "domain", "homecloud.dev")
+    info = connection_info("dagster", "100.1.1.1")
+    assert "magic_dns" not in info
+    assert info["local_ip"] == ""
 
 
 def test_ssh_command_uses_private_host(monkeypatch):

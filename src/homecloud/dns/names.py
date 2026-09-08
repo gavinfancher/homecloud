@@ -29,14 +29,18 @@ def ssh_command(name: str) -> str:
     return f"ssh {settings.vm_ssh_user}@{private_fqdn(name)}"
 
 
-def connection_info(name: str, tailscale_ip: str) -> dict:
-    magic = vm_fqdn(name)
+def connection_info(name: str, tailscale_ip: str, local_ip: str | None = None) -> dict:
+    """Connection details surfaced by the API for an instance.
+
+    *local_ip* is the VM's LAN (DHCP) address; the Tailscale MagicDNS name is
+    deliberately not exposed — the split-DNS ``hostname`` is the name to use.
+    """
     private = private_fqdn(name)
     return {
         "hostname": private,
         "private_host": private,
-        "magic_dns": magic,
         "tailscale_ip": tailscale_ip,
         "ip": tailscale_ip,
+        "local_ip": local_ip or "",
         "ssh": ssh_command(name),
     }

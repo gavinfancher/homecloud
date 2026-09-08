@@ -19,7 +19,7 @@ from homecloud.api.schemas import (
 from homecloud.auth import extract_token, get_clerk_auth
 from homecloud.config import settings
 from homecloud.db.session import db_enabled
-from homecloud.dns.names import connection_info, vm_fqdn
+from homecloud.dns.names import connection_info, private_fqdn
 from homecloud.images import store as image_store
 from homecloud.images.builder import ImageBuilder
 from homecloud.images.deployer import VMDeployer, VMManager
@@ -39,6 +39,7 @@ from homecloud.state import (
     list_registered_vms,
     save_setup,
     set_built_template,
+    set_instance_local_ip,
     set_instance_ports,
 )
 
@@ -51,7 +52,25 @@ public_router = APIRouter(prefix="/api", tags=["public"])
 auth_router = APIRouter(tags=["auth"])
 
 
-def _merge_registered(vms: list[dict]) -> list[dict]:
+def _local_ip(vm: dict, proxmox: ProxmoxClient | None) -> str:
+    """LAN address for *vm* — live from the guest agent, falling back to state.
+
+    Running VMs are re-probed (cached in the client) because DHCP can move a VM
+    to a new lease; the stored value is refreshed whenever it changes so a
+    stopped VM still shows the address it last had.
+    """
+    stored = vm.get("local_ip") or ""
+    if proxmox is None or vm.get("status") != "running" or not vm.get("vmid"):
+        return stored
+    live = proxmox.get_lan_ip(vm["vmid"])
+    if not live:
+        return stored
+    if live != stored and vm.get("name"):
+        set_instance_local_ip(vm["name"], live)
+    return live
+
+
+def _merge_registered(vms: list[dict], proxmox: ProxmoxClient | None = None) -> list[dict]:
     registered = list_registered_vms()
     for vm in vms:
         name = vm.get("name", "")
@@ -65,14 +84,16 @@ def _merge_registered(vms: list[dict]) -> list[dict]:
                 vm["cores"] = reg["cores"]
             if vm.get("memory_gb") is None and reg.get("memory_gb") is not None:
                 vm["memory_gb"] = reg["memory_gb"]
-        # Always expose current MagicDNS hostname (migrates away from legacy .home records)
+        # Always expose the current split-DNS hostname and LAN address
+        # (migrates away from legacy .home records).
         if name:
+            local_ip = _local_ip(vm, proxmox)
             if vm.get("tailscale_ip") or vm.get("ip"):
                 ip = vm.get("tailscale_ip") or vm.get("ip")
-                vm.update(connection_info(name, ip))
+                vm.update(connection_info(name, ip, local_ip))
             else:
-                vm["hostname"] = vm_fqdn(name)
-                vm["magic_dns"] = vm_fqdn(name)
+                vm["hostname"] = private_fqdn(name)
+                vm["local_ip"] = local_ip
         if vm.get("memory_gb") is None and vm.get("memory_mb"):
             # maxmem from the cluster list is bytes; config memory is MB.
             mb = vm["memory_mb"]
@@ -135,6 +156,7 @@ def auth_verify(request: Request):
 def dashboard() -> dict:
     hydrate_registry()
     proxmox = ProxmoxClient()
+    # Dashboard only needs counts — skip the guest-agent LAN IP probe.
     vms = _sort_vms(_merge_registered(proxmox.list_vms()))
     templates = proxmox.list_templates()
     running = sum(1 for vm in vms if vm.get("status") == "running")
@@ -405,7 +427,7 @@ def cancel_job(job_id: str) -> dict:
 @router.get("/vms")
 def list_vms() -> list[dict]:
     proxmox = ProxmoxClient()
-    return _sort_vms(_merge_registered(proxmox.list_vms()))
+    return _sort_vms(_merge_registered(proxmox.list_vms(), proxmox))
 
 
 @router.get("/vms/{vmid}")
@@ -414,7 +436,7 @@ def get_vm(vmid: int) -> dict:
     vm = proxmox.get_vm(vmid)
     if vm is None:
         raise HTTPException(404, "VM not found")
-    merged = _merge_registered([vm])[0]
+    merged = _merge_registered([vm], proxmox)[0]
     merged["registered"] = vm.get("name", "") in list_registered_vms()
     return merged
 

@@ -153,11 +153,11 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
                   '—'
                 )}
               </Field>
-              <Field label="MagicDNS">
-                {vm.magic_dns ? (
+              <Field label="Local IP">
+                {vm.local_ip ? (
                   <span className="copyrow">
-                    <Mono>{vm.magic_dns}</Mono>
-                    <CopyButton value={vm.magic_dns} />
+                    <Mono>{vm.local_ip}</Mono>
+                    <CopyButton value={vm.local_ip} />
                   </span>
                 ) : (
                   '—'

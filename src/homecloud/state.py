@@ -129,6 +129,20 @@ def register_vm(name: str, record: dict) -> None:
     save_state(state)
 
 
+def set_instance_local_ip(name: str, local_ip: str) -> None:
+    """Record the LAN address of *name*, but only when it actually changed.
+
+    DHCP can move a VM to a new lease, so the stored value is refreshed from
+    the guest agent; skipping no-op writes keeps state.json quiet.
+    """
+    state = load_state()
+    vm = state.get("vms", {}).get(name)
+    if vm is None or vm.get("local_ip") == local_ip:
+        return
+    vm["local_ip"] = local_ip
+    save_state(state)
+
+
 def unregister_vm(name: str) -> None:
     state = load_state()
     state.get("vms", {}).pop(name, None)
