@@ -17,6 +17,7 @@ dependencies = [
     "pyjwt[crypto]>=2.13.0",
     "sqlalchemy>=2.0.36",
     "psycopg[binary]>=3.2.3",
+    "pycdlib>=1.21.0",
 ]
 
 [project.optional-dependencies]

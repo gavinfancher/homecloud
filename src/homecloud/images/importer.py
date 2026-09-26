@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from homecloud.config import settings
 from homecloud.db.models import CloudImage
 from homecloud.db.session import session_scope
 from homecloud.proxmox.client import ProxmoxClient
@@ -30,12 +29,21 @@ def _noop_log(_level: str, _message: str) -> None:
     pass
 
 
-def remote_image_path(cloud_image: CloudImage) -> str:
-    """Where this cloud image is cached on the Proxmox node."""
-    filename = Path(urlparse(cloud_image.url).path).name
-    if not filename:
-        filename = f"{cloud_image.id}.img"
-    return f"{settings.cloud_image_cache_dir.rstrip('/')}/{filename}"
+# Proxmox only imports disks from these formats, and infers the format from
+# the extension.  Distro ".img" cloud images (Ubuntu's) are qcow2 inside.
+_IMPORT_EXTENSIONS = {".qcow2": ".qcow2", ".raw": ".raw", ".vmdk": ".vmdk", ".img": ".qcow2"}
+
+
+def import_filename(cloud_image: CloudImage) -> str:
+    """File name the cloud image is cached under in the node's ``import`` storage."""
+    upstream = Path(urlparse(cloud_image.url).path).name
+    suffix = Path(upstream).suffix.lower()
+    if suffix not in _IMPORT_EXTENSIONS:
+        raise ValueError(
+            f"Cannot import {upstream or cloud_image.url!r}: Proxmox imports "
+            "qcow2, raw, vmdk or img cloud images"
+        )
+    return f"{cloud_image.id}{_IMPORT_EXTENSIONS[suffix]}"
 
 
 def ensure_cloud_image_template(
@@ -60,22 +68,22 @@ def ensure_cloud_image_template(
             emit("info", f"Using cached {cloud_image.name} template #{cloud_image.template_id}")
             return cloud_image.template_id
         name, url, sha256 = cloud_image.name, cloud_image.url, cloud_image.sha256
-        path = remote_image_path(cloud_image)
-    if pve.cloud_image_exists(path):
-        emit("info", f"Cloud image already on the node: {path}")
+        filename = import_filename(cloud_image)
+    volid = f"{pve.image_storage}:import/{filename}"
+    if pve.volume_exists(volid):
+        emit("info", f"Cloud image already on the node: {volid}")
     else:
         emit("info", f"Downloading {name} — this can take a few minutes…")
-        pve.download_cloud_image(url, path, sha256=sha256)
-        emit("info", f"Downloaded to {path}")
+        volid = pve.download_cloud_image(url, filename, sha256=sha256)
+        emit("info", f"Downloaded to {volid}")
 
     vmid = pve.next_vmid(start=CLOUD_IMAGE_VMID_START)
 
     emit("info", f"Creating VM {vmid} for the imported disk")
     pve.create_vm(vmid, f"cloudimg-{cloud_image_id}")
 
-    emit("info", "Importing disk (qm set --import-from)…")
-    pve.import_cloud_image_disk(vmid, path)
-    pve.attach_cloudinit_drive(vmid)
+    emit("info", "Importing disk…")
+    pve.import_cloud_image_disk(vmid, volid)
 
     emit("info", f"Converting VM {vmid} to template")
     pve.convert_to_template(vmid)

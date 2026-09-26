@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+import io
 import ipaddress
 import logging
-import shlex
-import subprocess
+import re
 import threading
 import time
 from collections.abc import Callable
-from pathlib import Path
 from urllib.parse import quote
 
 from proxmoxer import ProxmoxAPI
 
 from homecloud.config import settings
+from homecloud.proxmox import seed
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,13 @@ _LAN_IP_CACHE_TTL = 60.0
 _NON_LAN_IFACES = ("tailscale", "docker", "br-", "veth", "virbr", "cni", "flannel")
 # Tailscale hands out CGNAT addresses; those are the tailnet IP, not the LAN one.
 _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_MAC_RE = re.compile(r"=([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
+
+
+def _nic_mac(net: str) -> str | None:
+    """MAC address out of a ``net0`` value like ``virtio=BC:24:11:..,bridge=vmbr0``."""
+    match = _MAC_RE.search(net)
+    return match.group(1) if match else None
 
 
 class ProxmoxClient:
@@ -47,6 +54,8 @@ class ProxmoxClient:
         )
         self.node = settings.proxmox_node
         self.storage = settings.proxmox_storage
+        # Directory storage for seed ISOs and downloaded cloud images.
+        self.image_storage = settings.proxmox_image_storage
 
     @property
     def api(self) -> ProxmoxAPI:
@@ -150,8 +159,6 @@ class ProxmoxClient:
 
     @staticmethod
     def _disk_gb_from_config(config: dict) -> int | None:
-        import re
-
         scsi0 = config.get("scsi0", "")
         match = re.search(r"size=(\d+)G", scsi0)
         return int(match.group(1)) if match else None
@@ -179,68 +186,104 @@ class ProxmoxClient:
         )
         return task
 
-    def upload_snippet(self, filename: str, content: str, *, storage: str = "local") -> str:
-        """Write cloud-init user-data to Proxmox snippets storage."""
-        snippets_dir = Path(settings.proxmox_snippets_dir)
-        if snippets_dir.is_dir():
-            (snippets_dir / filename).write_text(content)
-            return f"local:snippets/{filename}"
+    # ------------------------------------------------------------------
+    # Cloud-init seed ISOs (NoCloud) — see homecloud.proxmox.seed
+    # ------------------------------------------------------------------
 
-        # Snippets can only be written on the node itself: the storage upload
-        # API accepts content=iso|vztmpl|import and rejects "snippets".
-        if not settings.proxmox_ssh_host:
+    def _require_content(self, content: str) -> None:
+        """Fail early, with the fix, when the image storage can't hold *content*."""
+        for entry in self._api.storage.get():
+            if entry.get("storage") != self.image_storage:
+                continue
+            allowed = (entry.get("content") or "").split(",")
+            if content in allowed:
+                return
             raise RuntimeError(
-                "PROXMOX_SSH_HOST is not configured - writing cloud-init snippets "
-                "requires SSH access to the Proxmox node"
+                f"Proxmox storage '{self.image_storage}' does not allow '{content}' content. "
+                f"Enable it under Datacenter → Storage → {self.image_storage} → Content "
+                f"(or `pvesm set {self.image_storage} --content "
+                f"{','.join([*filter(None, allowed), content])}` on the node)."
             )
+        raise RuntimeError(f"Proxmox storage '{self.image_storage}' does not exist")
 
-        path = f"{settings.proxmox_snippets_dir}/{filename}"
-        result = subprocess.run(
-            ["ssh", settings.proxmox_ssh_host, f"cat > {shlex.quote(path)}"],
-            input=content,
-            text=True,
-            capture_output=True,
+    def _storage_content(self):
+        return self._api.nodes(self.node).storage(self.image_storage).content
+
+    def volume_exists(self, volid: str) -> bool:
+        content = volid.split(":", 1)[1].split("/", 1)[0] if ":" in volid else None
+        entries = self._storage_content().get(**({"content": content} if content else {}))
+        return any(e.get("volid") == volid for e in entries)
+
+    def delete_volume(self, volid: str) -> None:
+        # The volid contains ":" and "/"; encode it so it stays one path segment.
+        task = self._storage_content()(quote(volid, safe="")).delete()
+        if isinstance(task, str) and task.startswith("UPID:"):
+            self.wait_for_task(task, timeout=120)
+
+    def upload_iso(self, filename: str, data: bytes) -> str:
+        """Upload *data* as ``iso`` content and return its volume id."""
+        self._require_content("iso")
+        buf = io.BytesIO(data)
+        # proxmoxer names the multipart part after the file object's .name.
+        buf.name = filename
+        task = self._api.nodes(self.node).storage(self.image_storage).upload.post(
+            content="iso", filename=buf
         )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or f"exit {result.returncode}"
-            logger.error(
-                "Snippet write to %s:%s failed: %s", settings.proxmox_ssh_host, path, detail
-            )
-            raise RuntimeError(
-                f"Could not write cloud-init snippet to {settings.proxmox_ssh_host}:{path} "
-                f"({detail}). Check that ssh/config defines host "
-                f"'{settings.proxmox_ssh_host}' and that its key is present in /root/.ssh."
-            )
-        return f"local:snippets/{filename}"
+        if task:
+            self.wait_for_task(task, timeout=120)
+        return f"{self.image_storage}:iso/{filename}"
 
-    def set_cloudinit(
-        self,
-        vmid: int,
-        *,
-        user_data: str | None = None,
-        ipconfig0: str | None = "ip=dhcp",
-        sshkeys: list[str] | str | None = None,
-        ciuser: str | None = None,
-        snippet_storage: str = "local",
-    ) -> None:
-        params: dict = {}
-        if user_data is not None:
-            snippet_name = f"homecloud-{vmid}-user.yaml"
-            snippet_ref = self.upload_snippet(snippet_name, user_data, storage=snippet_storage)
-            params["cicustom"] = f"user={snippet_ref}"
-        if ipconfig0 is not None:
-            params["ipconfig0"] = ipconfig0
-        if sshkeys is not None:
-            # Proxmox accepts newline-separated keys, all URL-encoded together.
-            if isinstance(sshkeys, list):
-                key_str = "\n".join(k.strip().splitlines()[0] for k in sshkeys if k.strip())
-            else:
-                key_str = sshkeys.strip().splitlines()[0]
-            params["sshkeys"] = quote(key_str, safe="")
-        if ciuser is not None:
-            params["ciuser"] = ciuser
-        if params:
-            self._api.nodes(self.node).qemu(vmid).config.put(**params)
+    def attach_seed(self, vmid: int, *, hostname: str, user_data: str) -> str:
+        """Give *vmid* its cloud-init data as a NoCloud seed ISO on ``ide2``.
+
+        Clones inherit the template's Proxmox cloud-init drive on ``ide2``
+        (and, on older templates, a ``cicustom`` snippet reference).  Both are
+        removed first: two NoCloud sources would race, and the seed ISO carries
+        the complete user-data, meta-data and network config on its own.
+        """
+        config = self.get_vm_config(vmid)
+        mac = _nic_mac(config.get("net0", ""))
+        if mac is None:
+            raise RuntimeError(f"VM {vmid} has no net0 MAC address to write network config for")
+
+        iso = seed.build_seed_iso(
+            user_data=user_data,
+            meta_data=seed.render_meta_data(hostname=hostname),
+            network_config=seed.render_network_config(mac),
+        )
+        volid = self.upload_iso(seed.seed_iso_filename(vmid), iso)
+
+        stale = [key for key in ("cicustom", "ciuser", "sshkeys", "ipconfig0") if key in config]
+        if "cloudinit" in config.get("ide2", ""):
+            stale.insert(0, "ide2")
+        if stale:
+            self._api.nodes(self.node).qemu(vmid).config.put(delete=",".join(stale))
+        self._api.nodes(self.node).qemu(vmid).config.put(ide2=f"{volid},media=cdrom")
+        return volid
+
+    def detach_seed(self, vmid: int) -> None:
+        """Eject the seed ISO and delete it from storage.
+
+        Once cloud-init has run the seed is dead weight — and the deploy seed
+        holds the Tailscale auth key, so it should not linger on the node.
+        Ejecting (rather than removing the drive) works on a running VM.  Only
+        the eject is required — a template must not reference the ISO — so a
+        failed delete is logged rather than raised.
+        """
+        config = self.get_vm_config(vmid)
+        filename = seed.seed_iso_filename(vmid)
+        if filename in config.get("ide2", ""):
+            self._api.nodes(self.node).qemu(vmid).config.put(ide2="none,media=cdrom")
+        try:
+            self.delete_seed(vmid)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not delete seed ISO for VM %s", vmid, exc_info=True)
+
+    def delete_seed(self, vmid: int) -> None:
+        """Delete *vmid*'s seed ISO from storage if it is still there."""
+        volid = f"{self.image_storage}:iso/{seed.seed_iso_filename(vmid)}"
+        if self.volume_exists(volid):
+            self.delete_volume(volid)
 
     def resize_disk(self, vmid: int, disk: str, size_gb: int) -> None:
         self._api.nodes(self.node).qemu(vmid).resize.put(disk=disk, size=f"+{size_gb}G")
@@ -277,66 +320,33 @@ class ProxmoxClient:
         raise TimeoutError(f"Proxmox task {upid} timed out after {timeout}s")
 
     # ------------------------------------------------------------------
-    # Cloud image import (requires PROXMOX_SSH_HOST — `qm` runs on the node)
+    # Cloud image import
     # ------------------------------------------------------------------
-
-    def ssh_exec(self, command: str, *, timeout: int = 600) -> str:
-        """Run a shell command on the Proxmox node over SSH.
-
-        Raises RuntimeError when PROXMOX_SSH_HOST is unset, since disk import
-        has no API equivalent.
-        """
-        if not settings.proxmox_ssh_host:
-            raise RuntimeError(
-                "PROXMOX_SSH_HOST is not configured — importing cloud images "
-                "requires SSH access to the Proxmox node"
-            )
-        result = subprocess.run(
-            ["ssh", settings.proxmox_ssh_host, command],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Proxmox node command failed ({result.returncode}): "
-                f"{result.stderr.strip() or command}"
-            )
-        return result.stdout
-
-    def cloud_image_exists(self, remote_path: str) -> bool:
-        try:
-            self.ssh_exec(f"test -s {shlex.quote(remote_path)}", timeout=30)
-        except RuntimeError:
-            return False
-        return True
 
     def download_cloud_image(
         self,
         url: str,
-        remote_path: str,
+        filename: str,
         *,
         sha256: str | None = None,
         timeout: int = 1800,
-    ) -> None:
-        """Fetch a distro cloud image onto the node, then verify it.
+    ) -> str:
+        """Have the node fetch a distro cloud image as ``import`` content.
 
-        Downloads to a temporary path and moves it into place only after the
-        checksum passes, so an interrupted transfer never poisons the cache.
+        Proxmox verifies the checksum itself and discards the download when it
+        does not match, so a bad transfer never lands in the cache.  Returns
+        the volume id.
         """
-        quoted = shlex.quote(remote_path)
-        tmp = shlex.quote(f"{remote_path}.part")
-        self.ssh_exec(f"mkdir -p {shlex.quote(str(Path(remote_path).parent))}", timeout=30)
-        self.ssh_exec(f"curl -fL --retry 3 -o {tmp} {shlex.quote(url)}", timeout=timeout)
+        self._require_content("import")
+        params: dict = {"content": "import", "filename": filename, "url": url}
         if sha256:
-            out = self.ssh_exec(f"sha256sum {tmp}", timeout=300)
-            actual = out.split()[0] if out.split() else ""
-            if actual.lower() != sha256.lower():
-                self.ssh_exec(f"rm -f {tmp}", timeout=30)
-                raise RuntimeError(
-                    f"Checksum mismatch for {url}: expected {sha256}, got {actual}"
-                )
-        self.ssh_exec(f"mv {tmp} {quoted}", timeout=60)
+            params["checksum"] = sha256.lower()
+            params["checksum-algorithm"] = "sha256"
+        task = self._api.nodes(self.node).storage(self.image_storage)("download-url").post(
+            **params
+        )
+        self.wait_for_task(task, timeout=timeout)
+        return f"{self.image_storage}:import/{filename}"
 
     def create_vm(
         self,
@@ -360,20 +370,14 @@ class ProxmoxClient:
             vga="serial0",
         )
 
-    def import_cloud_image_disk(self, vmid: int, remote_path: str) -> None:
+    def import_cloud_image_disk(self, vmid: int, volid: str, *, timeout: int = 1800) -> None:
         """Import a downloaded cloud image as the VM's scsi0 boot disk."""
-        self.ssh_exec(
-            f"qm set {vmid} --scsi0 "
-            f"{shlex.quote(self.storage)}:0,import-from={shlex.quote(remote_path)}",
-            timeout=1800,
-        )
-
-    def attach_cloudinit_drive(self, vmid: int) -> None:
-        """Add the cloud-init drive and make the imported disk bootable."""
-        self._api.nodes(self.node).qemu(vmid).config.put(
-            ide2=f"{self.storage}:cloudinit",
+        task = self._api.nodes(self.node).qemu(vmid).config.post(
+            scsi0=f"{self.storage}:0,import-from={volid}",
             boot="order=scsi0",
         )
+        if task:
+            self.wait_for_task(task, timeout=timeout)
 
     def get_vm_config(self, vmid: int) -> dict:
         return self._api.nodes(self.node).qemu(vmid).config.get()
@@ -451,9 +455,6 @@ class ProxmoxClient:
             except Exception:
                 time.sleep(3)
         raise TimeoutError(f"Guest agent not ready on VM {vmid}")
-
-    def regenerate_cloudinit(self, vmid: int) -> None:
-        self._api.nodes(self.node).qemu(vmid).cloudinit.put()
 
     def prepare_for_template(self, vmid: int) -> None:
         """Strip per-machine identity so clones boot as distinct hosts.

@@ -80,7 +80,7 @@ class ImageBuilder:
             ssh_user=settings.vm_ssh_user,
             ssh_public_keys=ssh_keys,
         )
-        self._apply_cloudinit(vmid, user_data, sshkeys=ssh_keys)
+        self.proxmox.attach_seed(vmid, hostname=name, user_data=user_data)
 
         self.proxmox.set_resources(
             vmid,
@@ -108,6 +108,8 @@ class ImageBuilder:
         stop_task = self.proxmox.stop(vmid)
         self.proxmox.wait_for_task(stop_task, timeout=120)
 
+        # Clones get their own seed at deploy time; don't bake this one in.
+        self.proxmox.detach_seed(vmid)
         self.proxmox.convert_to_template(vmid)
         set_built_template(image_id, vmid)
         emit("info", f"Base image ready — template ID {vmid}")
@@ -196,13 +198,7 @@ class ImageBuilder:
                 config_files=plan["config_files"],
                 run_commands=plan["run_commands"],
             )
-            self.proxmox.set_cloudinit(
-                vmid,
-                user_data=user_data,
-                ciuser=ssh_user,
-                ipconfig0="ip=dhcp",
-                sshkeys=ssh_keys,
-            )
+            self.proxmox.attach_seed(vmid, hostname=tpl_name, user_data=user_data)
 
             self.proxmox.set_resources(
                 vmid, cores=plan["cores"], memory_mb=plan["memory_mb"]
@@ -228,6 +224,7 @@ class ImageBuilder:
 
             emit("info", "Stopping VM and converting to template")
             self.proxmox.wait_for_task(self.proxmox.stop(vmid), timeout=120)
+            self.proxmox.detach_seed(vmid)
             self.proxmox.convert_to_template(vmid)
         except Exception as exc:
             # Best-effort cleanup: a half-built VM left on the node just eats
@@ -242,6 +239,10 @@ class ImageBuilder:
                     self.proxmox.delete_vm(vmid)
                 except Exception:
                     logger.warning("Leftover build VM %s needs manual cleanup", vmid)
+                try:
+                    self.proxmox.delete_seed(vmid)
+                except Exception:
+                    logger.warning("Leftover seed ISO for build VM %s", vmid, exc_info=True)
 
             cancelled = isinstance(exc, JobCancelled)
             with session_scope() as session:
@@ -314,7 +315,7 @@ class ImageBuilder:
         if extra_packages:
             pkg_script = "\n".join(f"apt-get install -y {p}" for p in extra_packages)
             user_data = f"#cloud-config\nruncmd:\n  - apt-get update\n  - {pkg_script}\n"
-            self._apply_cloudinit(vmid, user_data)
+            self.proxmox.attach_seed(vmid, hostname=tpl_name, user_data=user_data)
 
         start_task = self.proxmox.start(vmid)
         self.proxmox.wait_for_task(start_task, timeout=120)
@@ -326,6 +327,7 @@ class ImageBuilder:
         stop_task = self.proxmox.stop(vmid)
         self.proxmox.wait_for_task(stop_task, timeout=120)
 
+        self.proxmox.detach_seed(vmid)
         self.proxmox.convert_to_template(vmid)
 
         return {
@@ -334,18 +336,3 @@ class ImageBuilder:
             "base_image_id": base_image_id,
             "status": "ready",
         }
-
-    def _apply_cloudinit(
-        self,
-        vmid: int,
-        user_data: str,
-        *,
-        sshkeys: list[str] | str | None = None,
-    ) -> None:
-        self.proxmox.set_cloudinit(
-            vmid,
-            user_data=user_data,
-            ciuser=settings.vm_ssh_user,
-            ipconfig0="ip=dhcp",
-            sshkeys=sshkeys,
-        )

@@ -109,13 +109,7 @@ class VMDeployer:
             tailscale_auth_key=settings.tailscale_auth_key,
             ssh_public_keys=ssh_keys,
         )
-        self.proxmox.set_cloudinit(
-            vmid,
-            user_data=deploy_cloud_init,
-            ciuser=settings.vm_ssh_user,
-            ipconfig0="ip=dhcp",
-            sshkeys=ssh_keys,
-        )
+        self.proxmox.attach_seed(vmid, hostname=name, user_data=deploy_cloud_init)
 
         memory_mb = int(memory_gb * 1024)
         emit(
@@ -124,7 +118,6 @@ class VMDeployer:
         )
         self.proxmox.set_resources(vmid, cores=cores, memory_mb=memory_mb)
         self._resize_disk_to_target(vmid, disk_gb)
-        self.proxmox.regenerate_cloudinit(vmid)
 
         emit("info", "Starting VM…")
         start_task = self.proxmox.start(vmid)
@@ -133,6 +126,14 @@ class VMDeployer:
 
         tailscale_ip = self._wait_for_tailscale_ip(name, log=emit, cancel_check=cancel_check)
         emit("info", f"Tailscale IP assigned: {tailscale_ip}")
+
+        # Joining the tailnet is the last thing the deploy seed does, and it
+        # carries the Tailscale auth key — don't leave it on the node.
+        try:
+            self.proxmox.detach_seed(vmid)
+        except Exception as exc:  # noqa: BLE001 — cleanup; the VM itself is fine
+            logger.warning("Could not remove cloud-init seed for VM %s", vmid, exc_info=True)
+            emit("warning", f"Could not remove the cloud-init seed ISO: {exc}")
 
         local_ip = self.proxmox.get_lan_ip(vmid, use_cache=False) or ""
         if local_ip:
@@ -285,6 +286,11 @@ class VMManager:
         task = self.proxmox.delete_vm(vmid)
         if task:
             self.proxmox.wait_for_task(task, timeout=120)
+        try:
+            # Normally gone after deploy; a failed deploy can leave it behind.
+            self.proxmox.delete_seed(vmid)
+        except Exception:
+            logger.warning("Could not delete cloud-init seed for VM %s", vmid, exc_info=True)
         ProxmoxClient.invalidate_vm_list_cache()
         # next_vmid reuses ids — a stale entry would label the next VM wrongly.
         ProxmoxClient.invalidate_lan_ip_cache(vmid)
