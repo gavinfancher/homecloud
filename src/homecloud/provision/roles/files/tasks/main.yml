@@ -1,0 +1,21 @@
+- name: Create parent directories
+  ansible.builtin.file:
+    path: "{{ item.path | dirname }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Write files
+  vars:
+    _owner: "{{ (item.owner | default('', true)).split(':') }}"
+  ansible.builtin.copy:
+    dest: "{{ item.path }}"
+    content: "{{ item.content }}"
+    mode: "{{ item.mode | default(omit, true) }}"
+    owner: "{{ _owner[0] if _owner[0] else omit }}"
+    group: "{{ _owner[1] if _owner | length > 1 and _owner[1] else omit }}"
+  loop: "{{ files }}"
+  loop_control:
+    label: "{{ item.path }}"

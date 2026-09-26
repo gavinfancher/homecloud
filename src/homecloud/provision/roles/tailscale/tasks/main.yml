@@ -1,0 +1,36 @@
+- name: Install Tailscale
+  ansible.builtin.shell: curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    creates: /usr/bin/tailscale
+
+- name: Read Tailscale state
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_status
+  changed_when: false
+  failed_when: false
+
+- name: Join the tailnet
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - --reset
+      - "--authkey={{ tailscale_auth_key }}"
+      - "--hostname={{ homecloud_hostname }}"
+      - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
+      - "--ssh={{ tailscale_ssh | bool | lower }}"
+  no_log: true
+  when: >-
+    tailscale_status.rc != 0 or
+    (tailscale_status.stdout | from_json).BackendState != 'Running'
+
+- name: Apply Tailscale settings
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - set
+      - "--operator={{ homecloud_user }}"
+      - --auto-update=true
+      - "--accept-routes={{ tailscale_accept_routes | bool | lower }}"
+      - "--ssh={{ tailscale_ssh | bool | lower }}"
+  changed_when: false

@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { RoleSelection } from '../api'
 import { IconClose, IconSettings } from './Icons'
+import { RoleEditor, defaultSelection, selectionValid } from './RoleEditor'
 import { useStore } from '../lib/store'
 import { useToast } from './Toast'
 
@@ -12,16 +15,23 @@ const LIMITS = {
 const CUSTOM = 'custom'
 
 export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
-  const { api, sizes, images, dashboard, refresh, openJob } = useStore()
+  const { api, sizes, sources, roles, refresh, openJob } = useStore()
   const toast = useToast()
+  const navigate = useNavigate()
   const [name, setName] = useState('')
   const [sizeId, setSizeId] = useState(sizes[0]?.id ?? 'small')
   const [cores, setCores] = useState(2)
   const [memoryGb, setMemoryGb] = useState(4)
   const [diskGb, setDiskGb] = useState(40)
+  const imported = sources.filter((s) => s.imported)
+  // Sources and roles can arrive after the modal opens; until the user picks,
+  // follow the first imported source and the catalog defaults.
+  const [pickedSource, setSourceId] = useState<string | null>(null)
+  const sourceId = pickedSource ?? imported[0]?.id ?? ''
+  const [edited, setSelection] = useState<RoleSelection[] | null>(null)
+  const selection = edited ?? defaultSelection(roles)
   const [busy, setBusy] = useState(false)
 
-  const baseReady = dashboard?.base_image_built ?? true
   const nameValid = /^[a-z][a-z0-9-]{1,30}$/.test(name)
   const isCustom = sizeId === CUSTOM
 
@@ -29,17 +39,18 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
     Number.isFinite(v) && v >= LIMITS[k].min && v <= LIMITS[k].max
   const customValid =
     inRange(cores, 'cores') && inRange(memoryGb, 'memory_gb') && inRange(diskGb, 'disk_gb')
-  const canSubmit = nameValid && (!isCustom || customValid)
+  const canSubmit =
+    nameValid && (!isCustom || customValid) && sourceId !== '' && selectionValid(selection)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!canSubmit) return
     setBusy(true)
     try {
-      const body = isCustom
-        ? { name, size_id: CUSTOM, cores, memory_gb: memoryGb, disk_gb: diskGb }
-        : { name, size_id: sizeId }
-      const { job_id } = await api.deploy(body)
+      const size = isCustom
+        ? { size_id: CUSTOM, cores, memory_gb: memoryGb, disk_gb: diskGb }
+        : { size_id: sizeId }
+      const { job_id } = await api.deploy({ name, ...size, source_id: sourceId, roles: selection })
       toast.success(`Deploying ${name}…`)
       openJob(job_id)
       refresh()
@@ -51,12 +62,10 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const baseImage = images.find((i) => i.id === 'homecloud-base')
-
   return (
     <>
       <div className="modal-scrim" onClick={onClose} />
-      <div className="modal" role="dialog" aria-label="Create instance">
+      <div className="modal modal-wide" role="dialog" aria-label="Create instance">
         <header className="modal-head">
           <h2>Create instance</h2>
           <button className="btn-icon" onClick={onClose} title="Close">
@@ -66,9 +75,19 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
 
         <form className="modal-form" onSubmit={submit}>
           <div className="modal-body">
-          {!baseReady && (
+          {imported.length === 0 && (
             <div className="callout callout-warn">
-              The base image is not built yet. Build it from the Images tab first.
+              <div>No source image is imported yet. Import one before creating instances.</div>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  onClose()
+                  navigate('/sources')
+                }}
+              >
+                Go to Sources
+              </button>
             </div>
           )}
 
@@ -144,11 +163,35 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {baseImage && (
-            <div className="form-note">
-              Image: <code>{baseImage.name}</code> — {baseImage.description}
+          {imported.length > 0 && (
+            <div className="form-field">
+              <span>Source image</span>
+              <div className="size-options">
+                {imported.map((src) => (
+                  <button
+                    type="button"
+                    key={src.id}
+                    className={`size-option ${sourceId === src.id ? 'selected' : ''}`}
+                    onClick={() => setSourceId(src.id)}
+                  >
+                    <span className="size-name">{src.name}</span>
+                    <span className="size-specs">
+                      {src.arch} · template #{src.template_id}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
+
+          <div className="form-field">
+            <span>Configure</span>
+            <small className="hint">
+              Ansible roles applied after the VM boots. You can change them later from the
+              instance.
+            </small>
+            <RoleEditor catalog={roles} value={selection} onChange={setSelection} />
+          </div>
           </div>
 
           <footer className="modal-foot">

@@ -1,8 +1,7 @@
 """Built-in catalog of upstream distro cloud images.
 
-These are seeded into the ``cloud_images`` table on startup.  Users can add
-their own rows through the API; only ``builtin`` entries are refreshed from
-this list (and only for fields the user cannot edit).
+These are seeded into the ``cloud_images`` table on startup and are the
+sources instances can be cloned from once imported.
 """
 
 from __future__ import annotations
@@ -25,6 +24,14 @@ class CatalogEntry:
 
 
 BUILTIN_CATALOG: list[CatalogEntry] = [
+    CatalogEntry(
+        id="ubuntu-26.04",
+        name="Ubuntu 26.04 LTS (Resolute)",
+        distro="ubuntu",
+        version="26.04",
+        url="https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img",
+        ssh_user="ubuntu",
+    ),
     CatalogEntry(
         id="ubuntu-24.04",
         name="Ubuntu 24.04 LTS (Noble)",

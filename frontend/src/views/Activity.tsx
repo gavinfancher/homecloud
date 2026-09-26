@@ -6,7 +6,7 @@ import { EmptyState, Pill, Spinner } from '../components/ui'
 import { relativeTime, titleCase } from '../lib/format'
 import { useStore } from '../lib/store'
 
-const INSTANCE_JOB_TYPES = new Set(['deploy_vm', 'delete_vm', 'scan_ports'])
+const INSTANCE_JOB_TYPES = new Set(['deploy_vm', 'delete_vm', 'scan_ports', 'provision_vm'])
 
 export function Activity() {
   const { api, openJob, vms } = useStore()

@@ -4,6 +4,7 @@ import io
 import ipaddress
 import logging
 import re
+import socket
 import threading
 import time
 from collections.abc import Callable
@@ -285,6 +286,31 @@ class ProxmoxClient:
         if self.volume_exists(volid):
             self.delete_volume(volid)
 
+    def attach_native_cloudinit_drive(self, vmid: int) -> None:
+        """Give *vmid* Proxmox's own cloud-init drive on ``ide2``."""
+        self._api.nodes(self.node).qemu(vmid).config.put(ide2=f"{self.storage}:cloudinit")
+
+    def set_native_cloudinit(
+        self,
+        vmid: int,
+        *,
+        ciuser: str,
+        sshkeys: list[str],
+        ipconfig0: str = "ip=dhcp",
+    ) -> None:
+        """Set the login user, authorized keys and network via Proxmox's cloud-init.
+
+        Proxmox renders these onto the cloud-init drive itself, so no custom
+        user-data (and no snippets storage) is involved.
+        """
+        # Proxmox accepts newline-separated keys, all URL-encoded together.
+        key_str = "\n".join(k.strip().splitlines()[0] for k in sshkeys if k.strip())
+        self._api.nodes(self.node).qemu(vmid).config.put(
+            ciuser=ciuser,
+            sshkeys=quote(key_str, safe=""),
+            ipconfig0=ipconfig0,
+        )
+
     def resize_disk(self, vmid: int, disk: str, size_gb: int) -> None:
         self._api.nodes(self.node).qemu(vmid).resize.put(disk=disk, size=f"+{size_gb}G")
 
@@ -307,8 +333,6 @@ class ProxmoxClient:
         self._api.nodes(self.node).qemu(vmid).template.post()
 
     def wait_for_task(self, upid: str, *, timeout: int = 600, poll: float = 2.0) -> None:
-        import time
-
         deadline = time.time() + timeout
         while time.time() < deadline:
             status = self._api.nodes(self.node).tasks(upid).status.get()
@@ -444,11 +468,17 @@ class ProxmoxClient:
             f"check the serial console with `qm terminal {vmid}` on the node."
         )
 
-    def wait_for_guest_agent(self, vmid: int, *, timeout: int = 180) -> None:
-        import time
-
+    def wait_for_guest_agent(
+        self,
+        vmid: int,
+        *,
+        timeout: int = 180,
+        check_cancel: Callable[[], None] | None = None,
+    ) -> None:
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if check_cancel is not None:
+                check_cancel()
             try:
                 self._api.nodes(self.node).qemu(vmid).agent("ping").post()
                 return
@@ -556,10 +586,37 @@ class ProxmoxClient:
             ProxmoxClient._lan_ip_cache[vmid] = (now, ip)
         return ip
 
-    def wait_for_vm_ip(self, vmid: int, *, timeout: int = 180) -> str:
+    @staticmethod
+    def wait_for_ssh(
+        ip: str,
+        *,
+        timeout: int = 180,
+        check_cancel: Callable[[], None] | None = None,
+    ) -> None:
+        """Block until *ip* accepts TCP connections on port 22."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if check_cancel is not None:
+                check_cancel()
+            try:
+                with socket.create_connection((ip, 22), timeout=5):
+                    return
+            except OSError:
+                time.sleep(3)
+        raise TimeoutError(f"SSH on {ip} did not come up within {timeout}s")
+
+    def wait_for_vm_ip(
+        self,
+        vmid: int,
+        *,
+        timeout: int = 180,
+        check_cancel: Callable[[], None] | None = None,
+    ) -> str:
         """Wait for the DHCP-assigned LAN IP via the QEMU guest agent."""
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if check_cancel is not None:
+                check_cancel()
             try:
                 self.wait_for_guest_agent(vmid, timeout=10)
                 ip = self._query_lan_ip(vmid)

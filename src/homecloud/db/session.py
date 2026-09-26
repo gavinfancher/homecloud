@@ -19,8 +19,8 @@ _Session: sessionmaker[Session] | None = None
 def db_enabled() -> bool:
     """True when a DATABASE_URL is configured.
 
-    With no URL the controller still serves the built-in image registry, so
-    local dev and the test suite run without Postgres.
+    With no URL the controller still manages existing instances, but sources
+    (and so new deploys) are unavailable.
     """
     return bool(settings.database_url)
 
@@ -29,7 +29,7 @@ def get_engine() -> Engine:
     global _engine, _Session
     if _engine is None:
         if not settings.database_url:
-            raise RuntimeError("DATABASE_URL is not set — the image database is unavailable")
+            raise RuntimeError("DATABASE_URL is not set — the source database is unavailable")
         _engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
         _Session = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine

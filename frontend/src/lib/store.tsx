@@ -12,10 +12,10 @@ import {
   createApi,
   CONN_FAIL_THRESHOLD,
   type Api,
-  type CloudImage,
   type Dashboard,
-  type Image,
+  type RoleSpec,
   type Size,
+  type Source,
   type TokenGetter,
   type VM,
 } from '../api'
@@ -25,13 +25,14 @@ interface Store {
   dashboard: Dashboard | null
   vms: VM[]
   sizes: Size[]
-  images: Image[]
-  /** Upstream distro base images. Empty when the controller has no database. */
-  cloudImages: CloudImage[]
+  /** Stock distro images to clone from. Empty when the controller has no database. */
+  sources: Source[]
+  /** The Ansible role catalog the create/reconfigure flows render. */
+  roles: RoleSpec[]
   ready: boolean
   connError: string | null
   refresh: () => Promise<void>
-  refreshImages: () => Promise<void>
+  refreshSources: () => Promise<void>
   activeJob: string | null
   openJob: (id: string) => void
   closeJob: () => void
@@ -58,8 +59,8 @@ export function StoreProvider({
   const [dashboard, setDashboard] = useState<Dashboard | null>(null)
   const [vms, setVms] = useState<VM[]>([])
   const [sizes, setSizes] = useState<Size[]>([])
-  const [images, setImages] = useState<Image[]>([])
-  const [cloudImages, setCloudImages] = useState<CloudImage[]>([])
+  const [sources, setSources] = useState<Source[]>([])
+  const [roles, setRoles] = useState<RoleSpec[]>([])
   const [ready, setReady] = useState(false)
   const [connError, setConnError] = useState<string | null>(null)
   const [activeJob, setActiveJob] = useState<string | null>(null)
@@ -98,14 +99,9 @@ export function StoreProvider({
     setReady(true)
   }, [api])
 
-  const refreshImages = useCallback(async () => {
+  const refreshSources = useCallback(async () => {
     try {
-      setImages(await api.images())
-    } catch {
-      /* non-fatal */
-    }
-    try {
-      setCloudImages(await api.cloudImages())
+      setSources(await api.sources())
     } catch {
       /* 503 when no database is configured — the picker stays empty */
     }
@@ -113,11 +109,12 @@ export function StoreProvider({
 
   useEffect(() => {
     api.sizes().then(setSizes).catch(() => {})
-    Promise.resolve().then(refreshImages)
+    api.roles().then(setRoles).catch(() => {})
+    Promise.resolve().then(refreshSources)
     Promise.resolve().then(refresh)
     const t = setInterval(refresh, activeJob ? 8000 : 5000)
     return () => clearInterval(t)
-  }, [api, refresh, refreshImages, activeJob])
+  }, [api, refresh, refreshSources, activeJob])
 
   const value = useMemo<Store>(
     () => ({
@@ -125,12 +122,12 @@ export function StoreProvider({
       dashboard,
       vms,
       sizes,
-      images,
-      cloudImages,
+      sources,
+      roles,
       ready,
       connError,
       refresh,
-      refreshImages,
+      refreshSources,
       activeJob,
       openJob: setActiveJob,
       closeJob: () => setActiveJob(null),
@@ -140,12 +137,12 @@ export function StoreProvider({
       dashboard,
       vms,
       sizes,
-      images,
-      cloudImages,
+      sources,
+      roles,
       ready,
       connError,
       refresh,
-      refreshImages,
+      refreshSources,
       activeJob,
     ],
   )

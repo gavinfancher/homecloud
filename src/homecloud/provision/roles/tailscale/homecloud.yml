@@ -1,0 +1,13 @@
+label: Tailscale
+description: Joins your tailnet under the instance name. Required — the instance's hostname, DNS record and SSH access all go through the tailnet.
+required: true
+order: 5
+vars:
+  - name: tailscale_accept_routes
+    label: Accept subnet routes
+    type: bool
+    default: true
+  - name: tailscale_ssh
+    label: Enable Tailscale SSH
+    type: bool
+    default: false

@@ -33,7 +33,7 @@ export function Settings() {
     setSaving(true)
     try {
       await api.saveSetup(keys)
-      toast.success('SSH keys saved — rebuild the base image to apply')
+      toast.success('SSH keys saved — new instances will get them')
       setNewKeys('')
       load()
       refresh()
@@ -103,7 +103,7 @@ export function Settings() {
               value={newKeys}
               onChange={(e) => setNewKeys(e.target.value)}
             />
-            <small className="hint">One key per line. Keys are baked into new images.</small>
+            <small className="hint">One key per line. Keys are added to instances when they are created.</small>
           </label>
 
           <p className="note-line">
@@ -128,6 +128,26 @@ export function Settings() {
           <Row label="Storage" value={status.proxmox_storage || '—'} />
           <Row label="Tailnet" value={status.tailscale_tailnet || 'not configured'} />
           <Row label="VM SSH user" value={status.vm_ssh_user || '—'} />
+        </div>
+      </section>
+
+      <section className="panel">
+        <header className="panel-head">
+          <h2>Controller key</h2>
+        </header>
+        <div className="panel-body">
+          <p className="muted small">
+            The controller authorizes this key on every new instance so it can run Ansible and
+            scan ports. Add it to an older instance's <code>authorized_keys</code> to let the
+            controller reconfigure it.
+          </p>
+          <div className="key-item">
+            <span className="key-glyph">
+              <IconKey width={15} height={15} />
+            </span>
+            <code className="key-text">{status.controller_public_key}</code>
+            <CopyButton value={status.controller_public_key} />
+          </div>
         </div>
       </section>
 

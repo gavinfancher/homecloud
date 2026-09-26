@@ -14,8 +14,6 @@ def load_state() -> dict:
             "setup_complete": False,
             "ssh_public_key": None,
             "ssh_public_keys": [],
-            "built_templates": {},
-            "custom_templates": {},
             "vms": {},
         }
     state = json.loads(STATE_FILE.read_text())
@@ -68,8 +66,7 @@ def save_setup(
     first key is also stored in the legacy ``ssh_public_key`` field for
     backward compatibility.
 
-    Note: changing keys only affects *new* images/instances.  A base-image
-    rebuild is required to bake new keys into future VMs.
+    Note: changing keys only affects instances deployed afterwards.
     """
     raw: list[str] = []
     if ssh_public_keys:
@@ -103,24 +100,10 @@ def is_setup_complete() -> bool:
     return bool(state.get("setup_complete") and has_key)
 
 
-def set_built_template(image_id: str, template_id: int) -> None:
-    state = load_state()
-    state.setdefault("built_templates", {})[image_id] = template_id
-    save_state(state)
 
 
-def get_built_template(image_id: str) -> int | None:
-    state = load_state()
-    return state.get("built_templates", {}).get(image_id)
 
 
-def register_custom_template(name: str, template_id: int, base_image_id: str) -> None:
-    state = load_state()
-    state.setdefault("custom_templates", {})[name] = {
-        "template_id": template_id,
-        "base_image_id": base_image_id,
-    }
-    save_state(state)
 
 
 def register_vm(name: str, record: dict) -> None:
@@ -153,13 +136,6 @@ def list_registered_vms() -> dict:
     return load_state().get("vms", {})
 
 
-def hydrate_registry() -> None:
-    from homecloud.images.registry import BUILTIN_IMAGES
-
-    state = load_state()
-    for image_id, template_id in state.get("built_templates", {}).items():
-        if image_id in BUILTIN_IMAGES:
-            BUILTIN_IMAGES[image_id].template_id = template_id
 
 
 # ---------------------------------------------------------------------------

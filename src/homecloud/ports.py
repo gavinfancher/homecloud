@@ -15,6 +15,7 @@ import re
 import subprocess
 
 from homecloud.config import settings
+from homecloud.provision.keys import controller_key_path
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ def scan_ports(instance: dict) -> list[dict]:
 
 
 def _scan_via_ssh(tailscale_ip: str) -> list[dict]:
-    """SSH into *tailscale_ip* and run ``ss``."""
+    """SSH into *tailscale_ip* as the controller and run ``ss``."""
     user = settings.vm_ssh_user
     # Try privileged scan first (includes process names); fall back gracefully
     # within the remote shell if the user is not root.
@@ -184,7 +185,10 @@ def _scan_via_ssh(tailscale_ip: str) -> list[dict]:
     result = subprocess.run(
         [
             "ssh",
+            "-i", str(controller_key_path()),
+            "-o", "IdentitiesOnly=yes",
             "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
             f"{user}@{tailscale_ip}",

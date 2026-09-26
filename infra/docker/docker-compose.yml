@@ -9,8 +9,8 @@ services:
       - "8080:8080"
     env_file: ../../.env
     volumes:
+      # state, jobs, and the controller's SSH key (controller_ed25519)
       - ../../.homecloud:/app/.homecloud
-      - ../../ssh:/mnt/ssh:ro
       # controller writes Caddy site files into this volume
       - caddy_sites:/etc/caddy/sites
       # controller writes CoreDNS zone files into this volume

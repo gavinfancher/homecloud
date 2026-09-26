@@ -1,0 +1,5 @@
+label: Docker
+description: Docker Engine and the compose plugin from Docker's official repository. The login user joins the docker group.
+order: 20
+default_enabled: true
+vars: []

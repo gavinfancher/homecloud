@@ -1,0 +1,8 @@
+label: Files
+description: Writes files onto the instance. Parent directories are created as needed.
+order: 40
+vars:
+  - name: files
+    label: Files
+    type: files
+    default: []

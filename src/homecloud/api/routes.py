@@ -9,10 +9,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from homecloud.access import ssh_config_block
 from homecloud.api.schemas import (
-    CloudImageRequest,
-    CustomImageRequest,
-    CustomImageUpdate,
     DeployVMRequest,
+    ProvisionRequest,
     PublishServiceRequest,
     SetupRequest,
 )
@@ -20,25 +18,21 @@ from homecloud.auth import extract_token, get_clerk_auth
 from homecloud.config import settings
 from homecloud.db.session import db_enabled
 from homecloud.dns.names import connection_info, private_fqdn
-from homecloud.images import store as image_store
-from homecloud.images.builder import ImageBuilder
 from homecloud.images.deployer import VMDeployer, VMManager
-from homecloud.images.registry import list_images
-from homecloud.images.store import ImageConflict, ImageNotFound
+from homecloud.images.sources import ensure_source_template, list_sources
 from homecloud.jobs import JobCancelled, job_store
 from homecloud.ports import scan_ports
+from homecloud.provision.catalog import RoleError, list_roles, resolve_roles
+from homecloud.provision.keys import controller_public_key
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.publish import publish_web, unpublish_web
 from homecloud.sizes import list_sizes
 from homecloud.state import (
-    get_built_template,
     get_instance,
     get_ssh_public_keys,
-    hydrate_registry,
     is_setup_complete,
     list_registered_vms,
     save_setup,
-    set_built_template,
     set_instance_local_ip,
     set_instance_ports,
 )
@@ -154,7 +148,6 @@ def auth_verify(request: Request):
 
 @router.get("/dashboard")
 def dashboard() -> dict:
-    hydrate_registry()
     proxmox = ProxmoxClient()
     # Dashboard only needs counts — skip the guest-agent LAN IP probe.
     vms = _sort_vms(_merge_registered(proxmox.list_vms()))
@@ -162,7 +155,7 @@ def dashboard() -> dict:
     running = sum(1 for vm in vms if vm.get("status") == "running")
     return {
         "setup_complete": is_setup_complete(),
-        "base_image_built": get_built_template("homecloud-base") is not None,
+        "source_imported": _any_source_imported(proxmox),
         "tailscale_tailnet": settings.tailscale_tailnet,
         "proxmox_node": settings.proxmox_node,
         "proxmox_storage": settings.proxmox_storage,
@@ -178,21 +171,17 @@ def dashboard() -> dict:
 
 @router.get("/setup")
 def setup_status() -> dict:
-    hydrate_registry()
     keys = get_ssh_public_keys()
     return {
         "setup_complete": is_setup_complete(),
-        "base_image_built": get_built_template("homecloud-base") is not None,
         "tailscale_tailnet": settings.tailscale_tailnet,
         "proxmox_node": settings.proxmox_node,
         "proxmox_storage": settings.proxmox_storage,
         "vm_ssh_user": settings.vm_ssh_user,
         "ssh_public_keys_count": len(keys),
         "ssh_public_keys": keys,
-        "rebuild_note": (
-            "Changing SSH keys only affects new images/instances. "
-            "A base-image rebuild is required to bake new keys into future VMs."
-        ),
+        "controller_public_key": controller_public_key(),
+        "rebuild_note": "Changing SSH keys only affects instances deployed afterwards.",
     }
 
 
@@ -206,11 +195,7 @@ def complete_setup(body: SetupRequest) -> dict:
     return {
         "setup_complete": True,
         "ssh_public_keys_count": len(keys),
-        "rebuild_required": True,
-        "rebuild_note": (
-            "Changing SSH keys only affects new images/instances. "
-            "A base-image rebuild is required to bake new keys into future VMs."
-        ),
+        "rebuild_note": "Changing SSH keys only affects instances deployed afterwards.",
     }
 
 
@@ -232,159 +217,50 @@ def _require_db() -> None:
     if not db_enabled():
         raise HTTPException(
             503,
-            "Custom images need a database — set DATABASE_URL and start the postgres service",
+            "Sources need a database — set DATABASE_URL and start the postgres service",
         )
 
 
-def _image_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, ImageNotFound):
-        return HTTPException(404, str(exc))
-    if isinstance(exc, ImageConflict):
-        return HTTPException(409, str(exc))
-    return HTTPException(400, str(exc))
-
-
-@router.get("/images")
-def images_list() -> list[dict]:
-    """Built-in registry images plus every custom image defined in the DB."""
-    hydrate_registry()
-    images = [
-        {
-            "id": img.id,
-            "name": img.name,
-            "description": img.description,
-            "kind": "builtin",
-            "cloud_image_id": None,
-            "built": (img.template_id or get_built_template(img.id)) is not None,
-            "status": (
-                "built" if (img.template_id or get_built_template(img.id)) else "draft"
-            ),
-            "template_id": img.template_id or get_built_template(img.id),
-            "default_cores": img.default_cores,
-            "default_memory_mb": img.default_memory_mb,
-            "default_disk_gb": img.default_disk_gb,
-            "packages": img.packages,
-            "config_files": [],
-            "run_commands": [],
-            "build_error": None,
-        }
-        for img in list_images()
-    ]
-    if db_enabled():
-        try:
-            images.extend(image_store.list_custom_images())
-        except Exception as exc:  # DB down — still serve the built-ins
-            logger.warning("Could not load custom images: %s", exc)
-    return images
-
-
-@router.get("/cloud-images")
-def cloud_images_list() -> list[dict]:
-    """Upstream distro cloud images available as a base layer."""
-    _require_db()
-    return image_store.list_cloud_images()
-
-
-@router.post("/cloud-images", status_code=201)
-def cloud_image_create(body: CloudImageRequest) -> dict:
-    _require_db()
+def _any_source_imported(proxmox: ProxmoxClient) -> bool:
+    if not db_enabled():
+        return False
     try:
-        return image_store.create_cloud_image(body.model_dump())
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
+        return any(s["imported"] for s in list_sources(proxmox))
+    except Exception:  # noqa: BLE001 — dashboard must render without the DB
+        logger.warning("Could not read sources", exc_info=True)
+        return False
 
 
-@router.delete("/cloud-images/{cloud_image_id}")
-def cloud_image_delete(cloud_image_id: str) -> dict:
+@router.get("/roles")
+def roles_list() -> list[dict]:
+    """The Ansible role catalog the create flow renders its configure step from."""
+    return list_roles()
+
+
+@router.get("/sources")
+def sources_list() -> list[dict]:
+    """Stock distro images instances are cloned from, with import status."""
     _require_db()
-    try:
-        return image_store.delete_cloud_image(cloud_image_id)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
+    return list_sources()
 
 
-@router.post("/images", status_code=201)
-def image_create(body: CustomImageRequest) -> dict:
-    """Define a custom image. Creating it does not build it — POST …/build next."""
+@router.post("/sources/{source_id}/import")
+def source_import(source_id: str) -> dict:
+    """Import a source onto the node (download, import, bake the guest agent)."""
     _require_db()
-    payload = body.model_dump()
-    payload["config_files"] = [f.model_dump(exclude_none=True) for f in body.config_files]
-    try:
-        return image_store.create_custom_image(payload)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.patch("/images/{image_id}")
-def image_update(image_id: str, body: CustomImageUpdate) -> dict:
-    _require_db()
-    changes = body.model_dump(exclude_unset=True)
-    if body.config_files is not None:
-        changes["config_files"] = [f.model_dump(exclude_none=True) for f in body.config_files]
-    if not changes:
-        raise HTTPException(400, "No fields to update")
-    try:
-        return image_store.update_custom_image(image_id, changes)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.delete("/images/{image_id}")
-def image_delete(image_id: str) -> dict:
-    _require_db()
-    try:
-        return image_store.delete_custom_image(image_id)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.post("/images/homecloud-base/build")
-def build_image() -> dict:
-    if not is_setup_complete():
-        raise HTTPException(400, "Upload your SSH public key in setup first")
-    hydrate_registry()
-    job = job_store.create(
-        "build_image", label="homecloud-base", meta={"image_id": "homecloud-base"}
-    )
-
-    def run() -> None:
-        job_store.start(job["id"])
-        builder = ImageBuilder()
-        try:
-            result = builder.build_builtin("homecloud-base", log=job_store.logger(job["id"]))
-            set_built_template("homecloud-base", result["template_id"])
-            job_store.complete(job["id"], result)
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
-    return {"job_id": job["id"]}
-
-
-@router.post("/images/{image_id}/build")
-def build_custom_image(image_id: str) -> dict:
-    """Bake a custom image into a Proxmox template. Returns a job to follow."""
-    _require_db()
-    if not is_setup_complete():
-        raise HTTPException(400, "Upload your SSH public key in setup first")
-
-    image = image_store.get_custom_image(image_id)
-    if image is None:
-        raise HTTPException(404, f"Unknown image: {image_id}")
-    if image["status"] == "building":
-        raise HTTPException(409, "Image is already building")
-
-    job = job_store.create("build_image", label=image_id, meta={"image_id": image_id})
+    if source_id not in {s["id"] for s in list_sources()}:
+        raise HTTPException(404, f"Unknown source: {source_id}")
+    job = job_store.create("import_source", label=source_id, meta={"source_id": source_id})
 
     def run() -> None:
         job_store.start(job["id"])
         try:
-            result = ImageBuilder().build_custom_image(
-                image_id,
+            template_id = ensure_source_template(
+                source_id,
                 log=job_store.logger(job["id"]),
                 cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
             )
-            job_store.complete(job["id"], result)
+            job_store.complete(job["id"], {"source_id": source_id, "template_id": template_id})
         except JobCancelled as exc:
             job_store.cancelled(job["id"], str(exc))
         except Exception as exc:
@@ -445,7 +321,11 @@ def get_vm(vmid: int) -> dict:
 def deploy_vm(body: DeployVMRequest) -> dict:
     if not is_setup_complete():
         raise HTTPException(400, "Upload your SSH public key in setup first")
-    hydrate_registry()
+    roles = [r.model_dump() for r in body.roles]
+    try:
+        resolve_roles(roles)  # fail fast; the job resolves again
+    except RoleError as exc:
+        raise HTTPException(400, str(exc)) from exc
     job = job_store.create(
         "deploy_vm",
         label=body.name,
@@ -455,7 +335,8 @@ def deploy_vm(body: DeployVMRequest) -> dict:
             "cores": body.cores,
             "memory_gb": body.memory_gb,
             "disk_gb": body.disk_gb,
-            "image_id": body.image_id,
+            "source_id": body.source_id,
+            "roles": [r["id"] for r in roles],
         },
     )
 
@@ -469,17 +350,48 @@ def deploy_vm(body: DeployVMRequest) -> dict:
                 cores=body.cores,  # type: ignore[arg-type]
                 memory_gb=body.memory_gb,  # type: ignore[arg-type]
                 disk_gb=body.disk_gb,  # type: ignore[arg-type]
-                image_id=body.image_id,
+                source_id=body.source_id,
+                roles=roles,
                 log=job_store.logger(job["id"]),
                 cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
             )
             job_store.complete(job["id"], result)
         except JobCancelled as exc:
             job_store.cancelled(job["id"], str(exc))
-        except (ValueError, TimeoutError) as exc:
-            job_store.fail(job["id"], str(exc))
         except httpx.HTTPError as exc:
             job_store.fail(job["id"], f"Tailscale API error: {exc}")
+        except Exception as exc:
+            job_store.fail(job["id"], str(exc))
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job_id": job["id"]}
+
+
+@router.post("/vms/{name}/provision")
+def provision_vm(name: str, body: ProvisionRequest) -> dict:
+    """Re-run Ansible on an existing instance with a new role selection."""
+    _require_instance(name)
+    roles = [r.model_dump() for r in body.roles]
+    try:
+        resolve_roles(roles)
+    except RoleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    job = job_store.create(
+        "provision_vm", label=name, meta={"name": name, "roles": [r["id"] for r in roles]}
+    )
+
+    def run() -> None:
+        job_store.start(job["id"])
+        try:
+            result = VMDeployer().provision(
+                name,
+                roles,
+                log=job_store.logger(job["id"]),
+                cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
+            )
+            job_store.complete(job["id"], result)
+        except JobCancelled as exc:
+            job_store.cancelled(job["id"], str(exc))
         except Exception as exc:
             job_store.fail(job["id"], str(exc))
 

@@ -1,0 +1,5 @@
+label: uv
+description: Astral's uv Python package manager, installed system-wide to /usr/local/bin.
+order: 30
+default_enabled: true
+vars: []

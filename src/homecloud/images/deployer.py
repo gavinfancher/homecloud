@@ -9,14 +9,15 @@ from homecloud.access import ssh_config_block
 from homecloud.config import settings
 from homecloud.dns.names import connection_info
 from homecloud.dns.zone import write_zone
-from homecloud.images.cloud_init import render_cloud_init
-from homecloud.images.registry import get_image
+from homecloud.images.sources import source_template
 from homecloud.jobs import JobCancelled
+from homecloud.provision.catalog import resolve_roles
+from homecloud.provision.keys import controller_public_key
+from homecloud.provision.runner import run_roles
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.state import (
-    get_built_template,
+    get_instance,
     get_ssh_public_keys,
-    hydrate_registry,
     register_vm,
     unregister_vm,
 )
@@ -30,21 +31,8 @@ def _noop_log(_level: str, _message: str) -> None:
     pass
 
 
-def _custom_image_template(image_id: str) -> int | None:
-    """Template id of a DB-defined custom image, or None if it has no build."""
-    from homecloud.db.session import db_enabled  # noqa: PLC0415
-    from homecloud.images.store import get_custom_image  # noqa: PLC0415
-
-    if not db_enabled():
-        raise ValueError(f"Unknown image: {image_id}")
-    image = get_custom_image(image_id)
-    if image is None:
-        raise ValueError(f"Unknown image: {image_id}")
-    return image["template_id"] if image["built"] else None
-
-
 class VMDeployer:
-    """Deploy VMs: join Tailscale, expose the split-DNS hostname and LAN address."""
+    """Deploy VMs: clone a source, run the selected Ansible roles, join Tailscale."""
 
     def __init__(self, proxmox: ProxmoxClient | None = None) -> None:
         self.proxmox = proxmox or ProxmoxClient()
@@ -57,8 +45,9 @@ class VMDeployer:
         cores: int,
         memory_gb: float,
         disk_gb: int,
+        source_id: str,
+        roles: list[dict],
         size_id: str = "custom",
-        image_id: str = "homecloud-base",
         log: LogFn | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> dict:
@@ -68,8 +57,6 @@ class VMDeployer:
             if cancel_check and cancel_check():
                 raise JobCancelled("Deployment cancelled by user")
 
-        hydrate_registry()
-
         check_cancel()
         emit("info", "Validating configuration…")
         if not settings.tailscale_auth_key:
@@ -77,16 +64,8 @@ class VMDeployer:
         if not settings.tailscale_api_key:
             raise ValueError("TAILSCALE_API_KEY required — to resolve Tailscale IPs")
 
-        spec = get_image(image_id)
-        if spec is not None:
-            template_id = spec.template_id or get_built_template(image_id)
-        else:
-            # Not a built-in — look for a custom image definition in the DB.
-            template_id = _custom_image_template(image_id)
-        if template_id is None:
-            raise ValueError(
-                f"Image '{image_id}' is not built yet — build it before deploying instances"
-            )
+        roles = resolve_roles(roles)
+        template_id = source_template(source_id, proxmox=self.proxmox)
 
         ssh_keys = get_ssh_public_keys()
         if not ssh_keys:
@@ -96,20 +75,17 @@ class VMDeployer:
         vmid = self.proxmox.next_vmid()
         emit("info", f"Allocated VM ID {vmid} for {name}")
 
-        emit("info", f"Cloning template {template_id}…")
-        task = self.proxmox.clone_template(template_id, vmid, name)
-        self.proxmox.wait_for_task(task)
+        emit("info", f"Cloning source template {template_id}…")
+        self.proxmox.wait_for_task(self.proxmox.clone_template(template_id, vmid, name))
         emit("info", "Clone complete")
         check_cancel()
 
-        emit("info", "Configuring cloud-init (Tailscale join + SSH keys)…")
-        deploy_cloud_init = render_cloud_init(
-            "deploy.yaml.j2",
-            hostname=name,
-            tailscale_auth_key=settings.tailscale_auth_key,
-            ssh_public_keys=ssh_keys,
+        # The controller's key sits next to yours so Ansible can get in.
+        self.proxmox.set_native_cloudinit(
+            vmid,
+            ciuser=settings.vm_ssh_user,
+            sshkeys=[*ssh_keys, controller_public_key()],
         )
-        self.proxmox.attach_seed(vmid, hostname=name, user_data=deploy_cloud_init)
 
         memory_mb = int(memory_gb * 1024)
         emit(
@@ -120,26 +96,18 @@ class VMDeployer:
         self._resize_disk_to_target(vmid, disk_gb)
 
         emit("info", "Starting VM…")
-        start_task = self.proxmox.start(vmid)
-        self.proxmox.wait_for_task(start_task, timeout=120)
-        emit("info", f"VM {vmid} is running — waiting for Tailscale join")
+        self.proxmox.wait_for_task(self.proxmox.start(vmid), timeout=120)
+
+        emit("info", "Waiting for the guest agent to report an address…")
+        local_ip = self.proxmox.wait_for_vm_ip(vmid, timeout=300, check_cancel=check_cancel)
+        emit("info", f"Local IP: {local_ip} — waiting for SSH")
+        self.proxmox.wait_for_ssh(local_ip, timeout=300, check_cancel=check_cancel)
+
+        emit("info", f"Running Ansible: {', '.join(r['id'] for r in roles)}")
+        run_roles(local_ip, roles, hostname=name, log=emit, cancel_check=cancel_check)
 
         tailscale_ip = self._wait_for_tailscale_ip(name, log=emit, cancel_check=cancel_check)
         emit("info", f"Tailscale IP assigned: {tailscale_ip}")
-
-        # Joining the tailnet is the last thing the deploy seed does, and it
-        # carries the Tailscale auth key — don't leave it on the node.
-        try:
-            self.proxmox.detach_seed(vmid)
-        except Exception as exc:  # noqa: BLE001 — cleanup; the VM itself is fine
-            logger.warning("Could not remove cloud-init seed for VM %s", vmid, exc_info=True)
-            emit("warning", f"Could not remove the cloud-init seed ISO: {exc}")
-
-        local_ip = self.proxmox.get_lan_ip(vmid, use_cache=False) or ""
-        if local_ip:
-            emit("info", f"Local IP: {local_ip}")
-        else:
-            emit("warning", "Could not read the LAN address from the guest agent")
 
         dns = connection_info(name, tailscale_ip, local_ip)
         emit("info", f"Hostname: {dns['hostname']}")
@@ -157,7 +125,8 @@ class VMDeployer:
             "memory_gb": memory_gb,
             "memory_mb": memory_mb,
             "disk_gb": disk_gb,
-            "image_id": image_id,
+            "source_id": source_id,
+            "roles": roles,
         }
         register_vm(name, record)
         try:
@@ -168,21 +137,38 @@ class VMDeployer:
         emit("info", f"Deployment complete — SSH: {dns['ssh']}")
 
         return {
-            "vmid": vmid,
-            "name": name,
+            **record,
             "status": "running",
-            "size_id": size_id,
-            "cores": cores,
-            "memory_gb": memory_gb,
-            "memory_mb": memory_mb,
-            "disk_gb": disk_gb,
-            "image_id": image_id,
-            "tailscale_ip": tailscale_ip,
-            "local_ip": local_ip,
-            "hostname": dns["hostname"],
             "ssh_command": dns["ssh"],
             "ssh_config": ssh_block,
         }
+
+    def provision(
+        self,
+        name: str,
+        roles: list[dict],
+        *,
+        log: LogFn | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict:
+        """Re-apply *roles* to an existing instance and remember them."""
+        emit = log or _noop_log
+        instance = get_instance(name)
+        if instance is None or not instance.get("vmid"):
+            raise ValueError(f"Unknown instance: {name}")
+        roles = resolve_roles(roles)
+
+        vmid = instance["vmid"]
+        host = self.proxmox.get_lan_ip(vmid, use_cache=False) or instance.get("local_ip")
+        if not host:
+            raise ValueError(f"No LAN address for {name} — is it running?")
+
+        emit("info", f"Running Ansible on {name} ({host}): {', '.join(r['id'] for r in roles)}")
+        run_roles(host, roles, hostname=name, log=emit, cancel_check=cancel_check)
+
+        register_vm(name, {**instance, "roles": roles, "local_ip": host})
+        emit("info", f"{name} reconfigured")
+        return {"name": name, "roles": roles}
 
     def _resize_disk_to_target(self, vmid: int, target_gb: int) -> None:
         config = self.proxmox.get_vm_config(vmid)
@@ -286,11 +272,6 @@ class VMManager:
         task = self.proxmox.delete_vm(vmid)
         if task:
             self.proxmox.wait_for_task(task, timeout=120)
-        try:
-            # Normally gone after deploy; a failed deploy can leave it behind.
-            self.proxmox.delete_seed(vmid)
-        except Exception:
-            logger.warning("Could not delete cloud-init seed for VM %s", vmid, exc_info=True)
         ProxmoxClient.invalidate_vm_list_cache()
         # next_vmid reuses ids — a stale entry would label the next VM wrongly.
         ProxmoxClient.invalidate_lan_ip_cache(vmid)

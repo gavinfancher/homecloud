@@ -1,0 +1,9 @@
+label: Packages
+description: Installs distro packages with the system package manager (apt or dnf). Names must exist on the source image's distro.
+order: 10
+default_enabled: true
+vars:
+  - name: packages
+    label: Packages
+    type: list
+    default: [curl, ca-certificates, btop, neovim, tmux, avahi-daemon]

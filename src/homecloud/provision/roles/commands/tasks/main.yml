@@ -1,0 +1,5 @@
+- name: Run commands
+  ansible.builtin.shell: "{{ item }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ commands }}"

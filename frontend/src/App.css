@@ -1292,7 +1292,58 @@ textarea {
   word-break: break-word;
 }
 
-/* ── Image builder ───────────────────────────────────── */
+/* ── Role editor ─────────────────────────────────────── */
+.role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.role-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.12s, background 0.12s;
+}
+.role-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.role-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.role-head input {
+  margin-top: 3px;
+  width: auto;
+}
+.role-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.role-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0 5px;
+}
+.role-vars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 12px 12px 34px;
+}
+.toolbar-note {
+  margin: 0;
+  max-width: 640px;
+}
+
+/* ── Forms ───────────────────────────────────────────── */
 .modal-wide {
   width: min(760px, calc(100vw - 32px));
 }

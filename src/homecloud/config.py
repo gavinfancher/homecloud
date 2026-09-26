@@ -17,11 +17,9 @@ class Settings(BaseSettings):
     # Directory storage that holds cloud-init seed ISOs (content "iso") and
     # downloaded distro cloud images (content "import").
     proxmox_image_storage: str = "local"
-    proxmox_base_template_id: int = 9000
 
-    # Database (image catalog + custom image definitions).
-    # Empty → the DB-backed image store is disabled and only the built-in
-    # registry is served, so local runs/tests work without Postgres.
+    # Database (source image catalog).
+    # Empty → sources are unavailable, so nothing can be deployed.
     database_url: str = ""
 
     # Tailscale — VMs join tailnet; SSH via MagicDNS (name.tailnet.ts.net)

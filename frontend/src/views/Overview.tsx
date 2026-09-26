@@ -22,14 +22,14 @@ export function Overview() {
 
   return (
     <div className="view">
-      {dashboard && !dashboard.base_image_built && (
+      {dashboard && !dashboard.source_imported && (
         <div className="callout callout-warn">
           <div>
-            <strong>Base image not built.</strong> Build the <code>homecloud-base</code> template
-            before creating instances.
+            <strong>No source image imported.</strong> Import one (e.g. Ubuntu 24.04) before
+            creating instances.
           </div>
-          <button className="btn btn-sm" onClick={() => navigate('/images')}>
-            Go to Images
+          <button className="btn btn-sm" onClick={() => navigate('/sources')}>
+            Go to Sources
           </button>
         </div>
       )}
@@ -56,10 +56,10 @@ export function Overview() {
             <Row label="Storage" value={dashboard?.proxmox_storage || '—'} />
             <Row label="Tailnet" value={dashboard?.tailscale_tailnet || 'not configured'} />
             <Row
-              label="Base image"
+              label="Sources"
               value={
-                <Pill status={dashboard?.base_image_built ? 'completed' : 'failed'}>
-                  {dashboard?.base_image_built ? 'Built' : 'Not built'}
+                <Pill status={dashboard?.source_imported ? 'completed' : 'failed'}>
+                  {dashboard?.source_imported ? 'Imported' : 'None imported'}
                 </Pill>
               }
             />

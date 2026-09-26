@@ -31,7 +31,8 @@ export interface VM {
   ip?: string
   ssh?: string
   size_id?: string
-  image_id?: string
+  source_id?: string
+  roles?: RoleSelection[]
   web?: WebService[]
   ports_seen?: SeenPort[]
   ports_scanned_at?: string | null
@@ -45,34 +46,8 @@ export interface Size {
   disk_gb: number
 }
 
-export interface ConfigFile {
-  path: string
-  content: string
-  permissions?: string | null
-  owner?: string | null
-}
-
-export type ImageStatus = 'draft' | 'building' | 'built' | 'failed'
-
-export interface Image {
-  id: string
-  name: string
-  description: string
-  kind: 'builtin' | 'custom'
-  cloud_image_id: string | null
-  built: boolean
-  status: ImageStatus
-  template_id: number | null
-  default_cores: number
-  default_memory_mb: number
-  default_disk_gb: number
-  packages: string[]
-  config_files: ConfigFile[]
-  run_commands: string[]
-  build_error: string | null
-}
-
-export interface CloudImage {
+/** A stock distro image instances are cloned from, once imported onto the node. */
+export interface Source {
   id: string
   name: string
   distro: string
@@ -87,18 +62,39 @@ export interface CloudImage {
   imported_at: string | null
 }
 
-/** Body for creating a custom image. */
-export interface CustomImageBody {
-  id: string
+export type RoleVarType = 'string' | 'text' | 'list' | 'bool' | 'files'
+
+export interface RoleFile {
+  path: string
+  content: string
+  mode?: string | null
+  owner?: string | null
+}
+
+export type RoleVarValue = string | boolean | string[] | RoleFile[]
+
+export interface RoleVar {
   name: string
+  label: string
+  type: RoleVarType
+  default: RoleVarValue | null
   description: string
-  cloud_image_id: string
-  packages: string[]
-  config_files: ConfigFile[]
-  run_commands: string[]
-  default_cores: number
-  default_memory_mb: number
-  default_disk_gb: number
+}
+
+/** An Ansible role from the controller's catalog. */
+export interface RoleSpec {
+  id: string
+  label: string
+  description: string
+  required: boolean
+  default_enabled: boolean
+  order: number
+  vars: RoleVar[]
+}
+
+export interface RoleSelection {
+  id: string
+  vars: Record<string, RoleVarValue>
 }
 
 export interface JobLog {
@@ -123,7 +119,7 @@ export interface Job {
 
 export interface Dashboard {
   setup_complete: boolean
-  base_image_built: boolean
+  source_imported: boolean
   tailscale_tailnet: string
   proxmox_node: string
   proxmox_storage?: string
@@ -133,13 +129,13 @@ export interface Dashboard {
 
 export interface SetupStatus {
   setup_complete: boolean
-  base_image_built: boolean
   tailscale_tailnet: string
   proxmox_node: string
   proxmox_storage: string
   vm_ssh_user: string
   ssh_public_keys_count: number
   ssh_public_keys: string[]
+  controller_public_key: string
   rebuild_note: string
 }
 
@@ -154,7 +150,8 @@ export interface DeployBody {
   cores?: number
   memory_gb?: number
   disk_gb?: number
-  image_id?: string
+  source_id: string
+  roles: RoleSelection[]
 }
 
 export const REQUEST_TIMEOUT_MS = 45_000
@@ -226,18 +223,17 @@ export function createApi(getToken: TokenGetter) {
     listVms: () => req<VM[]>('/api/vms'),
     getVm: (vmid: number) => req<VM>(`/api/vms/${vmid}`),
     sizes: () => req<Size[]>('/api/sizes'),
-    images: () => req<Image[]>('/api/images'),
-    buildBaseImage: () => req<{ job_id: string }>('/api/images/homecloud-base/build', { method: 'POST' }),
-    cloudImages: () => req<CloudImage[]>('/api/cloud-images'),
-    createImage: (body: CustomImageBody) =>
-      req<Image>('/api/images', { method: 'POST', body: JSON.stringify(body) }),
-    updateImage: (id: string, body: Partial<CustomImageBody>) =>
-      req<Image>(`/api/images/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    deleteImage: (id: string) => req<{ deleted: string }>(`/api/images/${id}`, { method: 'DELETE' }),
-    buildImage: (id: string) =>
-      req<{ job_id: string }>(`/api/images/${id}/build`, { method: 'POST' }),
+    roles: () => req<RoleSpec[]>('/api/roles'),
+    sources: () => req<Source[]>('/api/sources'),
+    importSource: (id: string) =>
+      req<{ job_id: string }>(`/api/sources/${id}/import`, { method: 'POST' }),
     deploy: (body: DeployBody) =>
       req<{ job_id: string }>('/api/vms', { method: 'POST', body: JSON.stringify(body) }),
+    provision: (name: string, roles: RoleSelection[]) =>
+      req<{ job_id: string }>(`/api/vms/${name}/provision`, {
+        method: 'POST',
+        body: JSON.stringify({ roles }),
+      }),
     listJobs: (limit = 30) => req<Job[]>(`/api/jobs?limit=${limit}`),
     job: (id: string) => req<Job>(`/api/jobs/${id}`),
     cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: 'POST' }),
