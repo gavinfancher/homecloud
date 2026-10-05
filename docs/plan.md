@@ -11,7 +11,7 @@ One control VM (`ubuntu@100.74.161.39`) running one Docker Compose stack:
 | `api`         | `ghcr.io/gavinfancher/homecloud:<sha>`  | FastAPI + DB-backed job runner in one process      |
 | `postgres`    | `postgres:18.4`                         | named volume, **all** state lives here             |
 | `cloudflared` | `cloudflare/cloudflared:<pinned>`       | tunnel `api.gavinf.com/homecloud` → `http://api:8080` |
-| `coredns`     | `coredns/coredns:<pinned>`              | split DNS for `dns.gavinf.com`, bound to the VM's tailnet IP:53 |
+| `coredns`     | `coredns/coredns:<pinned>`              | split DNS for `vm.gavinf.com`, bound to the VM's tailnet IP:53 |
 
 Everything else is removed: Caddy, Ansible, the `ssh/` mount, `.homecloud/*.json` and `.env` files on disk. The CoreDNS zone file is a *derived* artifact: it is rebuilt from the `instances` table on startup and on every change, and is never read back, so all state really is in Postgres.
 
@@ -161,3 +161,7 @@ Issues:
    - Find and update anything that uses `*.vm.homecloud.gavinf.com`: your `~/.ssh/config`, wishly's config, bookmarks.
    - Then remove the Tailscale split-DNS entry.
 9. **Name collisions.** Tailscale names a second device with the same hostname `name-1`. The current code matches devices by hostname. The new code stores `tailscale_device_id` at deploy time and uses that id for lookup and teardown.
+
+## DNS — as built (2026-10-05)
+
+Instances are `<vm>.vm.gavinf.com` (+ `*.<vm>.vm.gavinf.com`), served by CoreDNS on the control VM through Tailscale split DNS (`vm.gavinf.com → 100.74.161.39`). `vm.dns.gavinf.com` and `vm.homecloud.gavinf.com` are still served from the same records (`DNS_LEGACY_DOMAINS`) until clients move; then drop them from Infisical, the Corefile and the tailnet's split-DNS list. Don't create public records under `vm.gavinf.com`.

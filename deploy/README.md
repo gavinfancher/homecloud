@@ -8,7 +8,7 @@ credential on the box is the Infisical machine identity in
 ## Fresh VM
 
 1. **Join the tailnet** with `tailscale up`. CoreDNS binds the VM's tailnet IP,
-   and Tailscale split DNS (`vm.dns.gavinf.com` → that IP) points at it.
+   and Tailscale split DNS (`vm.gavinf.com` → that IP) points at it.
 2. **Run `sudo deploy/bootstrap.sh`.** It installs Docker and the Infisical
    CLI and creates `/etc/homecloud/infisical.env`.
 3. **Fill in `/etc/homecloud/infisical.env`** with a Universal Auth machine

@@ -37,9 +37,9 @@ class Settings(BaseSettings):
 
     # Private zone for instance names: <vm>.<domain> and *.<vm>.<domain>,
     # served by CoreDNS to the tailnet through Tailscale split DNS.
-    domain: str = "vm.dns.gavinf.com"
+    domain: str = "vm.gavinf.com"
     # Older zones still served with the same records while clients move over
-    # (comma-separated, e.g. "vm.homecloud.gavinf.com").
+    # (comma-separated, e.g. "vm.dns.gavinf.com,vm.homecloud.gavinf.com").
     dns_legacy_domains: str = ""
 
     # CoreDNS reads db.<zone> from here and reloads it on change.
