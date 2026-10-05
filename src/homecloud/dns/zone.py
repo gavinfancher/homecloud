@@ -1,17 +1,17 @@
-"""CoreDNS zone-file generation for private split DNS (Phase 06).
+"""CoreDNS zone files for the private split-DNS names of instances.
 
-render_zone() produces a valid RFC 1035 zone file for the homecloud.dev zone,
-assigning each registered instance its tailnet IP.  write_zone() reads state and
-writes the file to the configured path, then optionally runs a reload command.
+render_zone() produces an RFC 1035 zone giving each instance ``<vm>`` and
+``*.<vm>`` → its tailnet IP. write_zone() renders it from the instances table
+for the current zone and any legacy zones still being served, so a rename of
+the zone can roll out without names disappearing mid-move.
 
-Both functions degrade gracefully when the zone directory does not exist (dev
+Both degrade gracefully when the zone directory does not exist (dev
 environment without CoreDNS infra).
 """
 
 from __future__ import annotations
 
 import logging
-import subprocess
 import time
 from pathlib import Path
 
@@ -47,7 +47,7 @@ def render_zone(
         Zone serial number.  Defaults to the current unix timestamp (monotonic
         across calls).  Pass an explicit value for deterministic tests.
     domain:
-        Zone origin.  Defaults to ``settings.domain`` (``homecloud.dev``).
+        Zone origin.  Defaults to ``settings.domain``.
     """
     _domain = domain or settings.domain
     _serial = serial if serial is not None else _default_serial()
@@ -78,39 +78,32 @@ def render_zone(
     return "\n".join(lines)
 
 
-def write_zone() -> None:
-    """Read instances from state, render the zone file, and write it to disk.
+def zone_domains() -> list[str]:
+    """The current zone first, then any legacy zones still being served."""
+    legacy = [d.strip() for d in settings.dns_legacy_domains.split(",") if d.strip()]
+    return list(dict.fromkeys([settings.domain, *legacy]))
 
-    No-ops gracefully when the target directory does not exist (dev environment
-    without CoreDNS).  A zone-write failure is logged as a warning and never
-    propagates to the caller.
+
+def write_zone() -> None:
+    """Render every served zone from the instances table and write it to disk.
+
+    CoreDNS's ``file`` plugin notices the change and reloads on its own.
+    No-ops when the zone directory does not exist (dev without CoreDNS); a
+    failure is logged as a warning and never propagates to the caller.
     """
-    zone_path = Path(settings.coredns_zone_path)
-    if not zone_path.parent.exists():
-        logger.warning(
-            "CoreDNS zone directory %s does not exist — skipping zone write (no infra)",
-            zone_path.parent,
-        )
+    zone_dir = Path(settings.coredns_zone_dir)
+    if not zone_dir.is_dir():
+        logger.warning("CoreDNS zone directory %s does not exist — skipping zone write", zone_dir)
         return
 
     try:
         instances = list_registered_vms()
         control_ip = settings.control_node_tailscale_ip
         if not control_ip:
-            logger.warning(
-                "CONTROL_NODE_TAILSCALE_IP is not set — zone NS record will be empty"
-            )
-        zone_text = render_zone(instances, control_ip or "")
-        zone_path.write_text(zone_text)
-        logger.info("Wrote CoreDNS zone to %s (%d instance(s))", zone_path, len(instances))
+            logger.warning("CONTROL_NODE_TAILSCALE_IP is not set — zone NS record will be empty")
+        for domain in zone_domains():
+            path = zone_dir / f"db.{domain}"
+            path.write_text(render_zone(instances, control_ip or "", domain=domain))
+            logger.info("Wrote CoreDNS zone %s (%d instance(s))", path, len(instances))
     except Exception:
-        logger.warning("Failed to write CoreDNS zone to %s", zone_path, exc_info=True)
-        return
-
-    reload_cmd = settings.coredns_reload_cmd
-    if reload_cmd:
-        try:
-            subprocess.run(reload_cmd, shell=True, check=True, timeout=10)  # noqa: S602
-            logger.info("CoreDNS reload command ran successfully")
-        except Exception:
-            logger.warning("CoreDNS reload command failed", exc_info=True)
+        logger.warning("Failed to write CoreDNS zones to %s", zone_dir, exc_info=True)

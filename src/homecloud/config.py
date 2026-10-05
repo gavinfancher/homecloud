@@ -39,8 +39,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CONTROLLER_PORT", "AGENT_PORT"),
     )
 
-    # Public domain
-    domain: str = "vm.homecloud.gavinf.com"
+    # Private zone for instance names: <vm>.<domain> and *.<vm>.<domain>,
+    # served by CoreDNS to the tailnet through Tailscale split DNS.
+    domain: str = "vm.dns.gavinf.com"
+    # Older zones still served with the same records while clients move over
+    # (comma-separated, e.g. "vm.homecloud.gavinf.com").
+    dns_legacy_domains: str = ""
 
     # Cloudflare
     cloudflare_api_token: str = ""
@@ -53,8 +57,8 @@ class Settings(BaseSettings):
     caddy_reload_cmd: str = ""
 
     # Local resolver (split DNS)
-    coredns_zone_path: str = "/etc/coredns/db.vm.homecloud.gavinf.com"
-    coredns_reload_cmd: str = ""
+    # CoreDNS reads db.<zone> from here and reloads it on change.
+    coredns_zone_dir: str = "/etc/coredns"
     control_node_tailscale_ip: str = ""
 
     # Default primary web port for an instance's base hostname
@@ -70,13 +74,13 @@ class Settings(BaseSettings):
     # work without infra. In production set both → fail-closed.
     clerk_jwks_url: str = ""           # https://<slug>.clerk.accounts.dev/.well-known/jwks.json
     clerk_issuer: str = ""            # https://<slug>.clerk.accounts.dev
-    clerk_authorized_parties: str = ""  # comma-separated allowed azp (e.g. https://app.homecloud.dev)
+    clerk_authorized_parties: str = ""  # comma-separated allowed azp (e.g. https://homecloud.gavinf.com)
     clerk_publishable_key: str = ""   # public; surfaced to the SPA via GET /api/config
 
     # Frontend / API exposure (phases 09–11)
     frontend_origin: str = ""          # comma-separated CORS origins for the Pages SPA
-    api_public_host: str = ""          # e.g. api.homecloud.dev (tunnel/Caddy route)
-    console_url: str = ""              # e.g. https://app.homecloud.dev — login redirect target
+    api_public_host: str = ""          # e.g. homecloud-api.gavinf.com (tunnel route)
+    console_url: str = ""              # e.g. https://homecloud.gavinf.com — login redirect target
 
     # Caddy forward-auth (phase 11). When set, every published site is gated by
     # a forward_auth to this upstream's /auth/verify. Empty → no auth block.

@@ -1,6 +1,21 @@
-# Instance hostnames (dagster.gavin, etc.) come from the generated zone file.
-# Control-plane hosts (api, app) are NOT in the zone — fallthrough forwards them
-# to public DNS (Cloudflare) so the SPA and API keep working on the tailnet.
+# Split DNS for instance names. Tailscale sends queries for these zones to the
+# control VM's tailnet IP; everything else resolves publicly as usual.
+#
+# The controller writes db.<zone> from the instances table (DOMAIN, plus any
+# DNS_LEGACY_DOMAINS still being served) and the file plugin reloads it.
+# fallthrough + forward lets names outside the records resolve publicly.
+vm.dns.gavinf.com {
+    file /etc/coredns/db.vm.dns.gavinf.com vm.dns.gavinf.com {
+        reload 5s
+        fallthrough
+    }
+    forward . 1.1.1.1 9.9.9.9
+    cache 10
+    log
+    errors
+}
+
+# Legacy zone — same records — until every client uses vm.dns.gavinf.com.
 vm.homecloud.gavinf.com {
     file /etc/coredns/db.vm.homecloud.gavinf.com vm.homecloud.gavinf.com {
         reload 5s
