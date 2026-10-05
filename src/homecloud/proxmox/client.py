@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import ipaddress
 import logging
@@ -28,6 +29,20 @@ _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 # Proxmox's limit on agent/file-write content.
 _AGENT_WRITE_LIMIT = 61440
 _MAC_RE = re.compile(r"=([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
+
+
+def _agent_text(data: str | None) -> str:
+    """Guest output from ``exec-status``.
+
+    Proxmox hands the guest's UTF-8 bytes through one byte per character, so
+    non-ASCII output arrives as mojibake unless it is reassembled.
+    """
+    if not data:
+        return ""
+    try:
+        return data.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return data
 
 
 def _nic_mac(net: str) -> str | None:
@@ -417,8 +432,8 @@ class ProxmoxClient:
             if status.get("exited"):
                 return {
                     "exitcode": status.get("exitcode", 0),
-                    "out": status.get("out-data", "") or "",
-                    "err": status.get("err-data", "") or "",
+                    "out": _agent_text(status.get("out-data")),
+                    "err": _agent_text(status.get("err-data")),
                 }
             time.sleep(2)
         raise TimeoutError(f"Guest command on VM {vmid} timed out after {timeout}s")
@@ -426,16 +441,19 @@ class ProxmoxClient:
     def guest_write_file(self, vmid: int, path: str, content: str) -> None:
         """Write *content* to *path* in the guest through the agent.
 
-        Proxmox base64-encodes the content for QEMU and caps a single write at
-        60 KiB; larger content has to go through cloud-init instead.
+        The content is base64-encoded here (``encode=0``): Proxmox's own
+        encoding chokes on non-ASCII text.  A single write is capped at 60 KiB
+        of base64; larger content has to go through cloud-init instead.
         """
-        data = content.encode()
-        if len(data) > _AGENT_WRITE_LIMIT:
+        encoded = base64.b64encode(content.encode()).decode()
+        if len(encoded) > _AGENT_WRITE_LIMIT:
             raise ValueError(
-                f"{path} is {len(data)} bytes; the guest agent writes at most "
-                f"{_AGENT_WRITE_LIMIT} bytes at once"
+                f"{path} is too large for one guest agent write "
+                f"({len(encoded)} bytes encoded, limit {_AGENT_WRITE_LIMIT})"
             )
-        self._api.nodes(self.node).qemu(vmid).agent("file-write").post(file=path, content=content)
+        self._api.nodes(self.node).qemu(vmid).agent("file-write").post(
+            file=path, content=encoded, encode=0
+        )
 
     def wait_for_guest_file(
         self,

@@ -95,7 +95,10 @@ def parse_ss_output(text: str) -> list[dict]:
             if m:
                 proc = m.group(1)
 
-        publishable = address not in _LOOPBACK_ADDRS
+        # ss appends the interface to scoped binds (127.0.0.53%lo).
+        publishable = address.split("%")[0] not in _LOOPBACK_ADDRS and not address.startswith(
+            "127."
+        )
         entry: dict = {
             "port": port,
             "proc": proc,

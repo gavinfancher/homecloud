@@ -1,6 +1,6 @@
 import pytest
 
-from homecloud.proxmox.client import ProxmoxClient, _nic_mac
+from homecloud.proxmox.client import ProxmoxClient, _agent_text, _nic_mac
 
 
 @pytest.mark.parametrize(
@@ -91,3 +91,9 @@ def test_lan_ip_none_when_nothing_usable(payload):
 )
 def test_disk_gb_from_config(config, size):
     assert ProxmoxClient._disk_gb_from_config(config) == size
+
+
+def test_agent_text_reassembles_utf8():
+    assert _agent_text("▸ done".encode().decode("latin-1")) == "▸ done"
+    assert _agent_text(None) == ""
+    assert _agent_text("plain") == "plain"

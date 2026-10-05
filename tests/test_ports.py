@@ -81,3 +81,11 @@ def test_skips_blank_short_and_malformed_lines():
 
 def test_empty_output():
     assert parse_ss_output("") == []
+
+
+def test_scoped_and_127_8_binds_are_not_publishable():
+    text = (
+        "LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*\n"
+        "LISTEN 0 4096 127.0.0.54:53 0.0.0.0:*\n"
+    )
+    assert [p["publishable"] for p in parse_ss_output(text)] == [False, False]
