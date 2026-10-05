@@ -16,7 +16,8 @@ def test_catalog_is_in_play_order():
     roles = catalog.list_roles()
     keys = [(r["order"], r["id"]) for r in roles]
     assert keys == sorted(keys)
-    assert roles[0]["id"] == "tailscale"
+    # Joining the tailnet is last: an instance is reachable only once it is ready.
+    assert roles[-1]["id"] == "tailscale"
 
 
 def test_role_metadata_is_well_formed():
@@ -42,7 +43,7 @@ def test_selection_is_returned_in_catalog_order_with_defaults_filled():
             {"id": "tailscale", "vars": {"tailscale_ssh": True}},
         ]
     )
-    assert [r["id"] for r in result] == ["tailscale", "packages", "commands"]
+    assert [r["id"] for r in result] == ["packages", "commands", "tailscale"]
     by_id = {r["id"]: r["vars"] for r in result}
     assert by_id["tailscale"] == {"tailscale_accept_routes": True, "tailscale_ssh": True}
     assert by_id["packages"] == {"packages": []}
@@ -50,7 +51,7 @@ def test_selection_is_returned_in_catalog_order_with_defaults_filled():
 
 
 def test_files_are_normalised():
-    [_, files] = resolve_roles(
+    [files, _] = resolve_roles(
         [
             {
                 "id": "files",
