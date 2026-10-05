@@ -1,6 +1,14 @@
+from types import SimpleNamespace
+
 import pytest
 
-from homecloud.proxmox.client import ProxmoxClient, _agent_text, _nic_mac
+from homecloud.proxmox.client import (
+    ProxmoxClient,
+    _agent_text,
+    _nic_mac,
+    _random_mac,
+    _with_mac,
+)
 
 
 @pytest.mark.parametrize(
@@ -97,3 +105,45 @@ def test_agent_text_reassembles_utf8():
     assert _agent_text("▸ done".encode().decode("latin-1")) == "▸ done"
     assert _agent_text(None) == ""
     assert _agent_text("plain") == "plain"
+
+
+def test_random_mac_is_proxmox_prefixed_and_avoids_used():
+    mac = _random_mac(set())
+    assert mac.startswith("BC:24:11:") and _nic_mac(f"virtio={mac}") == mac
+    used = {_random_mac(set()).lower() for _ in range(50)}
+    assert _random_mac(used).lower() not in used
+
+
+def test_with_mac_replaces_only_the_mac():
+    net = "virtio=BC:24:11:00:00:01,bridge=vmbr0,firewall=1"
+    assert _with_mac(net, "BC:24:11:AA:BB:CC") == "virtio=BC:24:11:AA:BB:CC,bridge=vmbr0,firewall=1"
+    with pytest.raises(ValueError):
+        _with_mac("bridge=vmbr0", "BC:24:11:AA:BB:CC")
+
+
+class _FakeApi:
+    """Just enough of proxmoxer for ``qemu(vmid).config.put``."""
+
+    def __init__(self):
+        self.puts = []
+
+    def nodes(self, _node):
+        return self
+
+    def qemu(self, vmid):
+        puts = self.puts
+        return SimpleNamespace(config=SimpleNamespace(put=lambda **kw: puts.append((vmid, kw))))
+
+
+def test_assign_unique_mac_never_reuses_a_node_mac():
+    shared = "BC:24:11:00:00:01"  # a clone that kept its source's MAC
+    client = ProxmoxClient.__new__(ProxmoxClient)
+    client._api = _FakeApi()
+    client.node = "pve"
+    client.used_macs = lambda: {shared.lower()}
+    client.get_vm_config = lambda _vmid: {"net0": f"virtio={shared},bridge=vmbr0"}
+
+    mac = client.assign_unique_mac(503)
+
+    assert mac.lower() != shared.lower()
+    assert client._api.puts == [(503, {"net0": f"virtio={mac},bridge=vmbr0"})]

@@ -5,6 +5,7 @@ import io
 import ipaddress
 import logging
 import re
+import secrets
 import threading
 import time
 from collections.abc import Callable
@@ -29,6 +30,26 @@ _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 # Proxmox's limit on agent/file-write content.
 _AGENT_WRITE_LIMIT = 61440
 _MAC_RE = re.compile(r"=([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
+
+
+# Proxmox's own OUI; the rest is random. 2^24 addresses per node.
+_MAC_PREFIX = "BC:24:11"
+
+
+def _random_mac(used: set[str]) -> str:
+    """A Proxmox-prefixed MAC that is not in *used* (lower-case MACs)."""
+    while True:
+        tail = ":".join(f"{secrets.randbelow(256):02X}" for _ in range(3))
+        mac = f"{_MAC_PREFIX}:{tail}"
+        if mac.lower() not in used:
+            return mac
+
+
+def _with_mac(net: str, mac: str) -> str:
+    """``net0`` value with its MAC replaced, e.g. ``virtio=<mac>,bridge=vmbr0``."""
+    if _MAC_RE.search(net) is None:
+        raise ValueError(f"No MAC address in network config {net!r}")
+    return _MAC_RE.sub(f"={mac}", net, count=1)
 
 
 def _agent_text(data: str | None) -> str:
@@ -301,6 +322,31 @@ class ProxmoxClient:
         volid = f"{self.image_storage}:iso/{seed.seed_iso_filename(vmid)}"
         if self.volume_exists(volid):
             self.delete_volume(volid)
+
+    def used_macs(self) -> set[str]:
+        """Every NIC MAC on the node's VMs and templates, lower-cased."""
+        macs: set[str] = set()
+        for vm in self._api.nodes(self.node).qemu.get():
+            config = self._api.nodes(self.node).qemu(vm["vmid"]).config.get()
+            for key, value in config.items():
+                if key.startswith("net") and isinstance(value, str):
+                    mac = _nic_mac(value)
+                    if mac:
+                        macs.add(mac.lower())
+        return macs
+
+    def assign_unique_mac(self, vmid: int) -> str:
+        """Give *vmid*'s ``net0`` a fresh MAC no other VM on the node uses.
+
+        Two VMs sharing a MAC get the same DHCP lease — the same IP — so every
+        clone is re-addressed explicitly rather than trusting the clone to.
+        """
+        net0 = self.get_vm_config(vmid).get("net0", "")
+        # The clone's current MAC counts as used too: it may be a copy of
+        # another VM's, and the new one must differ from both.
+        mac = _random_mac(self.used_macs())
+        self._api.nodes(self.node).qemu(vmid).config.put(net0=_with_mac(net0, mac))
+        return mac
 
     def resize_disk(self, vmid: int, disk: str, size_gb: int) -> None:
         self._api.nodes(self.node).qemu(vmid).resize.put(disk=disk, size=f"+{size_gb}G")

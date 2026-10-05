@@ -129,6 +129,11 @@ class VMDeployer:
             pve.wait_for_task(clone_task)
             check_cancel()
 
+            # A MAC no other VM has → its own DHCP lease → its own IP. The
+            # seed's network config is rendered from this MAC, so it goes first.
+            mac = pve.assign_unique_mac(vmid)
+            emit("info", f"Assigned MAC {mac}")
+
             memory_mb = int(memory_gb * 1024)
             emit("info", f"Setting resources: {cores} vCPU, {memory_gb} GB RAM, {disk_gb} GB disk")
             pve.set_resources(vmid, cores=cores, memory_mb=memory_mb)
