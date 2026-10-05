@@ -16,20 +16,13 @@ _engine: Engine | None = None
 _Session: sessionmaker[Session] | None = None
 
 
-def db_enabled() -> bool:
-    """True when a DATABASE_URL is configured.
-
-    With no URL the controller still manages existing instances, but sources
-    (and so new deploys) are unavailable.
-    """
-    return bool(settings.database_url)
-
-
 def get_engine() -> Engine:
     global _engine, _Session
     if _engine is None:
         if not settings.database_url:
-            raise RuntimeError("DATABASE_URL is not set — the source database is unavailable")
+            raise RuntimeError(
+                "DATABASE_URL is not set — the controller keeps all state in Postgres"
+            )
         _engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
         _Session = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
@@ -52,16 +45,15 @@ def session_scope() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create tables and seed the built-in cloud image catalog.
+    """Apply pending migrations and seed the built-in cloud image catalog.
 
-    Safe to call on every startup: ``create_all`` is a no-op for existing
-    tables and seeding skips catalog rows that are already present.
+    Safe to call on every startup: applied migrations are skipped and seeding
+    skips catalog rows that are already present.
     """
-    from homecloud.db.models import Base
+    from homecloud.db.migrate import migrate
     from homecloud.images.catalog import seed_catalog
 
-    engine = get_engine()
-    Base.metadata.create_all(engine)
+    migrate(get_engine())
     with session_scope() as session:
         seed_catalog(session)
-    logger.info("Image database ready")
+    logger.info("Database ready")

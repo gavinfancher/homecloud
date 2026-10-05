@@ -1,35 +1,35 @@
+"""Instance and SSH key records, stored in Postgres.
+
+Every write is a single short transaction on one row, so concurrent jobs and
+requests can no longer overwrite each other's changes the way the old
+read-modify-write of ``state.json`` could.
+"""
+
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from datetime import UTC, datetime
 
-STATE_FILE = Path(".homecloud/state.json")
+from sqlalchemy import delete, exists, select
+
+from homecloud.db.models import Instance, SshKey
+from homecloud.db.session import session_scope
 
 _VALID_KEY_PREFIXES = ("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")
 
-
-def load_state() -> dict:
-    if not STATE_FILE.exists():
-        return {
-            "setup_complete": False,
-            "ssh_public_key": None,
-            "ssh_public_keys": [],
-            "vms": {},
-        }
-    state = json.loads(STATE_FILE.read_text())
-    state.setdefault("setup_complete", False)
-    state.setdefault("ssh_public_key", None)
-    state.setdefault("ssh_public_keys", [])
-    state.setdefault("vms", {})
-    # Backfill: if legacy single-key state exists but list is empty, migrate it.
-    if state["ssh_public_key"] and not state["ssh_public_keys"]:
-        state["ssh_public_keys"] = [state["ssh_public_key"]]
-    return state
-
-
-def save_state(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+# Instance record keys that map straight onto columns.
+_INSTANCE_FIELDS = (
+    "vmid",
+    "source_id",
+    "size_id",
+    "cores",
+    "memory_mb",
+    "disk_gb",
+    "local_ip",
+    "tailscale_ip",
+    "roles",
+    "web",
+    "ports_seen",
+)
 
 
 def _validate_key(raw: str) -> str:
@@ -41,16 +41,10 @@ def _validate_key(raw: str) -> str:
     return key
 
 
-def get_ssh_public_key() -> str | None:
-    """Return the first stored SSH public key (back-compat helper)."""
-    state = load_state()
-    keys = state.get("ssh_public_keys", [])
-    return keys[0] if keys else state.get("ssh_public_key")
-
-
 def get_ssh_public_keys() -> list[str]:
-    """Return all stored SSH public keys."""
-    return load_state().get("ssh_public_keys", [])
+    """Return all stored SSH public keys, oldest first."""
+    with session_scope() as session:
+        return list(session.scalars(select(SshKey.public_key).order_by(SshKey.id)))
 
 
 def save_setup(
@@ -58,13 +52,11 @@ def save_setup(
     ssh_public_key: str | None = None,
     ssh_public_keys: list[str] | None = None,
 ) -> None:
-    """Persist SSH public key(s) and mark setup complete.
+    """Replace the stored SSH public keys.
 
     Accepts a single key via *ssh_public_key* (legacy callers) or a list via
-    *ssh_public_keys*.  When both are supplied they are merged.  Each key is
-    validated for format, duplicates are removed (order preserved), and the
-    first key is also stored in the legacy ``ssh_public_key`` field for
-    backward compatibility.
+    *ssh_public_keys*; both are merged when supplied.  Each key is validated
+    and duplicates are removed (order preserved).
 
     Note: changing keys only affects instances deployed afterwards.
     """
@@ -77,75 +69,64 @@ def save_setup(
     if not raw:
         raise ValueError("At least one SSH public key is required")
 
-    validated: list[str] = [_validate_key(k) for k in raw]
-
-    # Dedupe, preserving order.
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for k in validated:
-        if k not in seen:
-            seen.add(k)
-            deduped.append(k)
-
-    state = load_state()
-    state["ssh_public_keys"] = deduped
-    state["ssh_public_key"] = deduped[0]  # back-compat: first key
-    state["setup_complete"] = True
-    save_state(state)
+    keys = list(dict.fromkeys(_validate_key(k) for k in raw))
+    with session_scope() as session:
+        session.execute(delete(SshKey))
+        session.add_all(SshKey(public_key=k) for k in keys)
 
 
 def is_setup_complete() -> bool:
-    state = load_state()
-    has_key = bool(state.get("ssh_public_keys") or state.get("ssh_public_key"))
-    return bool(state.get("setup_complete") and has_key)
-
-
-
-
-
-
+    with session_scope() as session:
+        return bool(session.scalar(select(exists().select_from(SshKey))))
 
 
 def register_vm(name: str, record: dict) -> None:
-    state = load_state()
-    state.setdefault("vms", {})[name] = record
-    save_state(state)
+    """Create or update the instance *name* from a record dict.
+
+    ``memory_gb`` is accepted for callers that only know the size in GB.
+    """
+    fields = {k: record[k] for k in _INSTANCE_FIELDS if k in record}
+    if "memory_mb" not in fields and record.get("memory_gb") is not None:
+        fields["memory_mb"] = int(record["memory_gb"] * 1024)
+    if "tailscale_ip" not in fields and record.get("ip"):
+        fields["tailscale_ip"] = record["ip"]
+    with session_scope() as session:
+        row = session.get(Instance, name)
+        if row is None:
+            session.add(Instance(name=name, **fields))
+            return
+        for key, value in fields.items():
+            setattr(row, key, value)
 
 
 def set_instance_local_ip(name: str, local_ip: str) -> None:
     """Record the LAN address of *name*, but only when it actually changed.
 
     DHCP can move a VM to a new lease, so the stored value is refreshed from
-    the guest agent; skipping no-op writes keeps state.json quiet.
+    the guest agent; skipping no-op writes keeps the row quiet.
     """
-    state = load_state()
-    vm = state.get("vms", {}).get(name)
-    if vm is None or vm.get("local_ip") == local_ip:
-        return
-    vm["local_ip"] = local_ip
-    save_state(state)
+    with session_scope() as session:
+        row = session.get(Instance, name)
+        if row is not None and row.local_ip != local_ip:
+            row.local_ip = local_ip
 
 
 def unregister_vm(name: str) -> None:
-    state = load_state()
-    state.get("vms", {}).pop(name, None)
-    save_state(state)
+    with session_scope() as session:
+        session.execute(delete(Instance).where(Instance.name == name))
 
 
 def list_registered_vms() -> dict:
-    return load_state().get("vms", {})
-
-
-
-
-# ---------------------------------------------------------------------------
-# Instance helpers (Phase 04 additions — additive, non-breaking)
-# ---------------------------------------------------------------------------
+    with session_scope() as session:
+        rows = session.scalars(select(Instance).order_by(Instance.name))
+        return {row.name: row.to_dict() for row in rows}
 
 
 def get_instance(name: str) -> dict | None:
-    """Return the state record for instance *name*, or None if not registered."""
-    return load_state().get("vms", {}).get(name)
+    """Return the record for instance *name*, or None if not registered."""
+    with session_scope() as session:
+        row = session.get(Instance, name)
+        return row.to_dict() if row else None
 
 
 def set_instance_web_service(
@@ -160,14 +141,9 @@ def set_instance_web_service(
 ) -> None:
     """Upsert a web service entry in the instance's ``web`` list.
 
-    Finds any existing entry with the same ``service`` name and replaces it;
-    appends a new entry otherwise.  Does not modify other keys of the instance
-    record.
+    Replaces any existing entry with the same ``service`` name and appends a
+    new one otherwise.  No-op when the instance is not registered.
     """
-    state = load_state()
-    vm = state.setdefault("vms", {}).setdefault(instance_name, {})
-    web_list: list[dict] = vm.setdefault("web", [])
-
     entry = {
         "service": service,
         "port": port,
@@ -176,15 +152,11 @@ def set_instance_web_service(
         "cloudflare_record_id": cloudflare_record_id,
         "caddy_config": caddy_config,
     }
-
-    for i, item in enumerate(web_list):
-        if item.get("service") == service:
-            web_list[i] = entry
-            break
-    else:
-        web_list.append(entry)
-
-    save_state(state)
+    with session_scope() as session:
+        row = session.get(Instance, instance_name, with_for_update=True)
+        if row is None:
+            return
+        row.web = [e for e in row.web if e.get("service") != service] + [entry]
 
 
 def remove_instance_web_service(instance_name: str, service: str) -> None:
@@ -192,30 +164,16 @@ def remove_instance_web_service(instance_name: str, service: str) -> None:
 
     No-op when the instance or service is not found.
     """
-    state = load_state()
-    vm = state.get("vms", {}).get(instance_name)
-    if vm is None:
-        return
-    vm["web"] = [e for e in vm.get("web", []) if e.get("service") != service]
-    save_state(state)
-
-
-# ---------------------------------------------------------------------------
-# Port-scan helpers (Phase 05 additions — additive, non-breaking)
-# ---------------------------------------------------------------------------
+    with session_scope() as session:
+        row = session.get(Instance, instance_name, with_for_update=True)
+        if row is not None:
+            row.web = [e for e in row.web if e.get("service") != service]
 
 
 def set_instance_ports(instance_name: str, ports: list[dict]) -> None:
-    """Persist port-scan results for *instance_name*.
-
-    Stores the list under ``ports_seen`` and records the current UTC timestamp
-    in ``ports_scanned_at``.  Creates the instance entry if it does not yet
-    exist in state (edge case: scan called before full registration).
-    """
-    from datetime import UTC, datetime  # noqa: PLC0415
-
-    state = load_state()
-    vm = state.setdefault("vms", {}).setdefault(instance_name, {})
-    vm["ports_seen"] = list(ports)
-    vm["ports_scanned_at"] = datetime.now(UTC).isoformat()
-    save_state(state)
+    """Persist port-scan results for *instance_name*. No-op when not registered."""
+    with session_scope() as session:
+        row = session.get(Instance, instance_name)
+        if row is not None:
+            row.ports_seen = list(ports)
+            row.ports_scanned_at = datetime.now(UTC)

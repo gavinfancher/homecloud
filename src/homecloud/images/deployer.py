@@ -166,7 +166,8 @@ class VMDeployer:
         emit("info", f"Running Ansible on {name} ({host}): {', '.join(r['id'] for r in roles)}")
         run_roles(host, roles, hostname=name, log=emit, cancel_check=cancel_check)
 
-        register_vm(name, {**instance, "roles": roles, "local_ip": host})
+        # Only the fields this run changed — the rest may have moved meanwhile.
+        register_vm(name, {"roles": roles, "local_ip": host})
         emit("info", f"{name} reconfigured")
         return {"name": name, "roles": roles}
 

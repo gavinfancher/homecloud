@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import threading
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -16,12 +14,10 @@ from homecloud.api.schemas import (
 )
 from homecloud.auth import extract_token, get_clerk_auth
 from homecloud.config import settings
-from homecloud.db.session import db_enabled
 from homecloud.dns.names import connection_info, private_fqdn
-from homecloud.images.deployer import VMDeployer, VMManager
-from homecloud.images.sources import ensure_source_template, list_sources
-from homecloud.jobs import JobCancelled, job_store
-from homecloud.ports import scan_ports
+from homecloud.images.deployer import VMManager
+from homecloud.images.sources import list_sources
+from homecloud.jobs import job_store
 from homecloud.provision.catalog import RoleError, list_roles, resolve_roles
 from homecloud.provision.keys import controller_public_key
 from homecloud.proxmox.client import ProxmoxClient
@@ -34,7 +30,6 @@ from homecloud.state import (
     list_registered_vms,
     save_setup,
     set_instance_local_ip,
-    set_instance_ports,
 )
 
 logger = logging.getLogger(__name__)
@@ -213,17 +208,7 @@ def sizes_list() -> list[dict]:
     ]
 
 
-def _require_db() -> None:
-    if not db_enabled():
-        raise HTTPException(
-            503,
-            "Sources need a database — set DATABASE_URL and start the postgres service",
-        )
-
-
 def _any_source_imported(proxmox: ProxmoxClient) -> bool:
-    if not db_enabled():
-        return False
     try:
         return any(s["imported"] for s in list_sources(proxmox))
     except Exception:  # noqa: BLE001 — dashboard must render without the DB
@@ -240,33 +225,20 @@ def roles_list() -> list[dict]:
 @router.get("/sources")
 def sources_list() -> list[dict]:
     """Stock distro images instances are cloned from, with import status."""
-    _require_db()
     return list_sources()
 
 
 @router.post("/sources/{source_id}/import")
 def source_import(source_id: str) -> dict:
     """Import a source onto the node (download, import, bake the guest agent)."""
-    _require_db()
     if source_id not in {s["id"] for s in list_sources()}:
         raise HTTPException(404, f"Unknown source: {source_id}")
-    job = job_store.create("import_source", label=source_id, meta={"source_id": source_id})
-
-    def run() -> None:
-        job_store.start(job["id"])
-        try:
-            template_id = ensure_source_template(
-                source_id,
-                log=job_store.logger(job["id"]),
-                cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
-            )
-            job_store.complete(job["id"], {"source_id": source_id, "template_id": template_id})
-        except JobCancelled as exc:
-            job_store.cancelled(job["id"], str(exc))
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
+    job = job_store.enqueue(
+        "import_source",
+        label=source_id,
+        meta={"source_id": source_id},
+        payload={"source_id": source_id},
+    )
     return {"job_id": job["id"]}
 
 
@@ -326,7 +298,7 @@ def deploy_vm(body: DeployVMRequest) -> dict:
         resolve_roles(roles)  # fail fast; the job resolves again
     except RoleError as exc:
         raise HTTPException(400, str(exc)) from exc
-    job = job_store.create(
+    job = job_store.enqueue(
         "deploy_vm",
         label=body.name,
         meta={
@@ -338,32 +310,16 @@ def deploy_vm(body: DeployVMRequest) -> dict:
             "source_id": body.source_id,
             "roles": [r["id"] for r in roles],
         },
+        payload={
+            "name": body.name,
+            "size_id": body.size_id or "custom",
+            "cores": body.cores,
+            "memory_gb": body.memory_gb,
+            "disk_gb": body.disk_gb,
+            "source_id": body.source_id,
+            "roles": roles,
+        },
     )
-
-    def run() -> None:
-        job_store.start(job["id"])
-        deployer = VMDeployer()
-        try:
-            result = deployer.deploy(
-                name=body.name,
-                size_id=body.size_id or "custom",
-                cores=body.cores,  # type: ignore[arg-type]
-                memory_gb=body.memory_gb,  # type: ignore[arg-type]
-                disk_gb=body.disk_gb,  # type: ignore[arg-type]
-                source_id=body.source_id,
-                roles=roles,
-                log=job_store.logger(job["id"]),
-                cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
-            )
-            job_store.complete(job["id"], result)
-        except JobCancelled as exc:
-            job_store.cancelled(job["id"], str(exc))
-        except httpx.HTTPError as exc:
-            job_store.fail(job["id"], f"Tailscale API error: {exc}")
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
     return {"job_id": job["id"]}
 
 
@@ -376,26 +332,12 @@ def provision_vm(name: str, body: ProvisionRequest) -> dict:
         resolve_roles(roles)
     except RoleError as exc:
         raise HTTPException(400, str(exc)) from exc
-    job = job_store.create(
-        "provision_vm", label=name, meta={"name": name, "roles": [r["id"] for r in roles]}
+    job = job_store.enqueue(
+        "provision_vm",
+        label=name,
+        meta={"name": name, "roles": [r["id"] for r in roles]},
+        payload={"name": name, "roles": roles},
     )
-
-    def run() -> None:
-        job_store.start(job["id"])
-        try:
-            result = VMDeployer().provision(
-                name,
-                roles,
-                log=job_store.logger(job["id"]),
-                cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
-            )
-            job_store.complete(job["id"], result)
-        except JobCancelled as exc:
-            job_store.cancelled(job["id"], str(exc))
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
     return {"job_id": job["id"]}
 
 
@@ -445,21 +387,12 @@ def delete_vm(vmid: int, name: str | None = None) -> dict:
                 name = vm.get("name")
                 break
     label = name or f"vm-{vmid}"
-    job = job_store.create("delete_vm", label=label, meta={"vmid": vmid, "name": name})
-
-    def run() -> None:
-        job_store.start(job["id"])
-        manager = VMManager()
-        log = job_store.logger(job["id"])
-        try:
-            log("info", f"Deleting {label}…")
-            result = manager.delete(vmid, name=name, log=log)
-            job_store.complete(job["id"], result)
-            log("info", f"Deleted {label}")
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
+    job = job_store.enqueue(
+        "delete_vm",
+        label=label,
+        meta={"vmid": vmid, "name": name},
+        payload={"vmid": vmid, "name": name},
+    )
     return {"job_id": job["id"]}
 
 
@@ -477,10 +410,10 @@ def ssh_config_export() -> dict:
 
 
 def _require_instance(name: str) -> dict:
-    """Return the registered state record for *name* or raise HTTP 404."""
+    """Return the registered record for *name* or raise HTTP 404."""
     instance = get_instance(name)
     if instance is None:
-        raise HTTPException(404, f"Instance '{name}' not found in state")
+        raise HTTPException(404, f"Instance '{name}' is not registered")
     return instance
 
 
@@ -488,43 +421,28 @@ def _require_instance(name: str) -> dict:
 def scan_ports_route(name: str) -> dict:
     """Create a background job that scans listening TCP ports on *name*.
 
-    The job persists results to ``state.vms[name].ports_seen`` on completion.
+    The job stores results on the instance (``ports_seen``) on completion.
     Returns ``{job_id}`` immediately.
     """
     instance = _require_instance(name)
-    job = job_store.create(
+    job = job_store.enqueue(
         "scan_ports",
         label=name,
-        meta={"instance": name, "tailscale_ip": instance.get("tailscale_ip", "")},
+        meta={"instance": name, "tailscale_ip": instance.get("tailscale_ip") or ""},
+        payload={"name": name},
     )
-
-    def run() -> None:
-        job_store.start(job["id"])
-        log = job_store.logger(job["id"])
-        try:
-            log("info", f"Starting port scan for {name} ({instance.get('tailscale_ip', 'no-ip')})")
-            # Re-read instance in case state changed between request and thread start.
-            current = get_instance(name) or instance
-            ports = scan_ports(current)
-            set_instance_ports(name, ports)
-            log("info", f"Found {len(ports)} listening port(s)")
-            job_store.complete(job["id"], {"ports": ports, "count": len(ports)})
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
     return {"job_id": job["id"]}
 
 
 @router.get("/vms/{name}/ports")
 def get_ports(name: str) -> dict:
-    """Return last port-scan results for *name* from state.
+    """Return the last port-scan results for *name*.
 
     Run ``POST /api/vms/{name}/scan-ports`` first to populate this.
     """
     instance = _require_instance(name)
     return {
-        "ports_seen": instance.get("ports_seen", []),
+        "ports_seen": instance.get("ports_seen") or [],
         "ports_scanned_at": instance.get("ports_scanned_at"),
     }
 
@@ -534,7 +452,7 @@ def publish_service(name: str, body: PublishServiceRequest) -> dict:
     """Publish *body.port* on instance *name* as a named web service.
 
     Calls ``publish_web`` (Caddy site file + optional Cloudflare CNAME) and
-    persists the entry under ``state.vms[name].web``.
+    persists the entry on the instance's ``web`` list.
 
     The ``service`` field must match ``^[a-z][a-z0-9-]{1,30}$`` (validated by
     the schema).  The ``port`` must appear in ``ports_seen`` unless
@@ -544,7 +462,7 @@ def publish_service(name: str, body: PublishServiceRequest) -> dict:
 
     # Port must have been seen in a recent scan (unless overridden).
     if not body.force:
-        seen_ports = {p["port"] for p in instance.get("ports_seen", [])}
+        seen_ports = {p["port"] for p in instance.get("ports_seen") or []}
         if body.port not in seen_ports:
             raise HTTPException(
                 400,
@@ -552,11 +470,11 @@ def publish_service(name: str, body: PublishServiceRequest) -> dict:
                 "Run POST /api/vms/{name}/scan-ports first, or set force=true to bypass.",
             )
 
-    upstream_host: str = instance.get("tailscale_ip", "")
+    upstream_host: str = instance.get("tailscale_ip") or ""
     if not upstream_host:
         raise HTTPException(
             400,
-            f"Instance '{name}' has no tailscale_ip recorded in state; "
+            f"Instance '{name}' has no tailscale_ip recorded; "
             "ensure the VM has joined the tailnet before publishing.",
         )
 

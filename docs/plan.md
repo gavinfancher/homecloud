@@ -29,13 +29,13 @@ Each stage can be shipped on its own, and prod keeps running between stages.
 - Note the PVE templates in use: `homecloud-base` (the clones' origin) and 9100 (`debian-12`).
 - Prod stays on `65e57cd` until Stage 6.
 
-### Stage 1: Build pipeline and packaging (repo only)
-- `Dockerfile`: `python:3.12-slim` + `uv sync --frozen --no-dev`, non-root user, `HEALTHCHECK` on `/api/health`. Drop `openssh-client` and `docker-entrypoint.sh`.
+### Stage 1: Build pipeline and packaging (repo only) — done
+- `Dockerfile`: `python:3.12-slim` + `uv sync --frozen --no-dev`, non-root user, `HEALTHCHECK` on `/api/health`. `docker-entrypoint.sh` is gone; `openssh-client` stays until Stage 3 removes Ansible.
 - `.github/workflows/ci.yml`: ruff + pytest + frontend build on PRs and on `main`.
 - `.github/workflows/release.yml`: on push to `main`, build `linux/amd64` and push `ghcr.io/gavinfancher/homecloud:{sha,main}`. The repo is public, so the package can be public and the VM pulls without a login.
 - Bring back the pure-logic tests that still apply (`parse_ss_output`, sizes, auth, names), plus new ones as the stages land.
 
-### Stage 2: All state in Postgres (no Alembic)
+### Stage 2: All state in Postgres (no Alembic) — done
 Migrations are plain numbered SQL files (`src/homecloud/db/migrations/001_init.sql`, …). A ~30-line runner applies them in order inside one transaction and records each in `schema_migrations(version, applied_at)`. It runs on startup under `pg_advisory_lock`. That covers everything Alembic would do for us.
 
 Tables:
@@ -50,9 +50,9 @@ Jobs: the API inserts a row, and a runner thread in the same process claims work
 - 2 instances (`pixie`, `wishly-vm`) get `base_image_id = NULL` (legacy) and `roles = []`
 - 1 SSH key is imported
 - `jobs.json` is dropped
-- tables `custom_images` and `cloud_images` are dropped
+- table `custom_images` is dropped by `001_init.sql`; `cloud_images` stays until Stage 3 replaces it with `base_images`
 
-Delete `state.py`, `jobs.py` (file store) and `provision/keys.py`.
+`state.py` and `jobs.py` now use Postgres. `provision/keys.py` (the controller SSH key in `.homecloud/`) stays until Stage 3 removes SSH. `base_images` arrives in Stage 3 as `002_*.sql`.
 
 ### Stage 3: API-only provisioning
 **Base image** (one definition, editable from the console and the API):

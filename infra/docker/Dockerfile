@@ -1,19 +1,59 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
+# Build context is the repo root:
+#   docker build -f infra/docker/Dockerfile .
 
-WORKDIR /app
+ARG PYTHON_IMAGE=python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
+# --- build: resolve the locked deps into /app/.venv -------------------------
+FROM ${PYTHON_IMAGE} AS build
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.21 /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+
+WORKDIR /src
+
+# Dependencies first, so editing src/ doesn't invalidate this layer.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+# Then the project itself, installed as a regular (non-editable) wheel so the
+# package — including provision/roles/**/*.yml — lives in site-packages and
+# the runtime image needs no source tree.
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
+
+# --- runtime -----------------------------------------------------------------
+FROM ${PYTHON_IMAGE}
+
+# openssh-client: Ansible and the port scanner still reach VMs over SSH.
+# Removed in Stage 3 (API-only provisioning).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
-COPY src ./src
+RUN groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid app --home-dir /app --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /app/.homecloud \
+    && chown -R app:app /app
 
-RUN pip install --no-cache-dir .
+COPY --from=build --chown=app:app /app/.venv /app/.venv
 
-COPY infra/docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+USER app
 
 EXPOSE 8080
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health', timeout=4)"]
+
 CMD ["homecloud"]
