@@ -66,7 +66,7 @@ services:
   # Remote-managed tunnel: routes live in the Cloudflare dashboard
   # (homecloud-api.gavinf.com → http://api:8080).
   cloudflared:
-    image: cloudflare/cloudflared:2026.9.1
+    image: cloudflare/cloudflared:2026.9.3
     container_name: homecloud-cloudflared
     restart: unless-stopped
     command: tunnel --no-autoupdate run
@@ -77,7 +77,7 @@ services:
 
   # Split DNS for instance names; Tailscale sends the zones' queries here.
   coredns:
-    image: coredns/coredns:1.12.4
+    image: coredns/coredns:1.14.7
     container_name: homecloud-coredns
     restart: unless-stopped
     command: -conf /etc/coredns/Corefile

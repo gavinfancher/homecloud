@@ -47,5 +47,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Stage 6: a `deploy` job goes here — needs: image, runs-on the self-hosted
-  # runner on the control VM, and runs `deploy.sh sha-<short>`.
+  # Pushes to main roll prod: the self-hosted runner on the control VM runs
+  # deploy.sh, which pulls the image, injects secrets from Infisical, health-
+  # checks the api and rolls back to the previous tag if it fails.
+  deploy:
+    needs: image
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, homecloud]
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy
+      - run: sudo -n deploy/deploy.sh "sha-${GITHUB_SHA::7}"
