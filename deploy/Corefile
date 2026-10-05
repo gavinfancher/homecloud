@@ -3,6 +3,18 @@
 #
 # The api writes /zones/db.<zone> from the instances table (DOMAIN, plus any
 # DNS_LEGACY_DOMAINS still being served) and the file plugin reloads it.
+vm.gavinf.com {
+    file /zones/db.vm.gavinf.com vm.gavinf.com {
+        reload 5s
+        fallthrough
+    }
+    forward . 1.1.1.1 9.9.9.9
+    cache 10
+    log
+    errors
+}
+
+# Legacy zones — same records — until every client uses vm.gavinf.com.
 vm.dns.gavinf.com {
     file /zones/db.vm.dns.gavinf.com vm.dns.gavinf.com {
         reload 5s
@@ -14,7 +26,6 @@ vm.dns.gavinf.com {
     errors
 }
 
-# Legacy zone — same records — until every client uses vm.dns.gavinf.com.
 vm.homecloud.gavinf.com {
     file /zones/db.vm.homecloud.gavinf.com vm.homecloud.gavinf.com {
         reload 5s
