@@ -11,7 +11,6 @@ guest agent and runs it. Nothing here opens an SSH connection.
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -133,7 +132,7 @@ class VMDeployer:
             memory_mb = int(memory_gb * 1024)
             emit("info", f"Setting resources: {cores} vCPU, {memory_gb} GB RAM, {disk_gb} GB disk")
             pve.set_resources(vmid, cores=cores, memory_mb=memory_mb)
-            self._resize_disk_to_target(vmid, disk_gb)
+            pve.grow_disk(vmid, "scsi0", disk_gb)
 
             script = render_script(roles, user=settings.vm_ssh_user, hostname=name)
             auth_key = self.tailscale.create_vm_auth_key(name)
@@ -256,13 +255,6 @@ class VMDeployer:
         for line in tail["out"].splitlines():
             if line.strip():
                 emit("error" if failed else "info", f"  {line}")
-
-    def _resize_disk_to_target(self, vmid: int, target_gb: int) -> None:
-        config = self.proxmox.get_vm_config(vmid)
-        match = re.search(r"size=(\d+)G", config.get("scsi0", ""))
-        current_gb = int(match.group(1)) if match else 0
-        if target_gb > current_gb:
-            self.proxmox.resize_disk(vmid, "scsi0", target_gb - current_gb)
 
     def _wait_for_device(
         self,

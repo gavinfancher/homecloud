@@ -39,15 +39,9 @@ LogFn = Callable[[str, str], None]
 # Templates live above the instance range so they are easy to spot on the node.
 TEMPLATE_VMID_START = 9100
 
-# Key the DHCP client identifier off the MAC rather than /etc/machine-id, so
-# clones can never collide on a lease even if a machine-id slips through.
-_DHCP_IDENTIFIER = """\
-network:
-  version: 2
-  ethernets:
-    eth0:
-      dhcp-identifier: mac
-"""
+# The stock cloud image disk is ~3.5 GB — too small for the bake's packages.
+# Clones grow from here to their own size.
+BAKE_DISK_GB = 8
 
 # cloud-config keys whose lists are concatenated (not replaced) when the extra
 # user-data is merged in.
@@ -95,13 +89,6 @@ def bake_user_data(
         "ssh_authorized_keys": list(ssh_keys),
         "package_update": True,
         "packages": ["qemu-guest-agent", *[p for p in packages if p != "qemu-guest-agent"]],
-        "write_files": [
-            {
-                "path": "/etc/netplan/99-homecloud-dhcp-identifier.yaml",
-                "permissions": "0600",
-                "content": _DHCP_IDENTIFIER,
-            }
-        ],
         "runcmd": [
             ["systemctl", "enable", "--now", "qemu-guest-agent"],
             # Installed, not joined: each instance joins with its own key.
@@ -262,6 +249,7 @@ def build(
         emit("info", f"Creating VM {vmid} ({name}) and importing the disk")
         pve.wait_for_task(pve.create_vm(vmid, name))
         pve.import_cloud_image_disk(vmid, volid)
+        pve.grow_disk(vmid, "scsi0", BAKE_DISK_GB)
         check_cancel()
 
         emit("info", "Booting once to bake in the guest agent, Tailscale and packages…")

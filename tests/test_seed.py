@@ -23,15 +23,17 @@ def test_meta_data_generates_fresh_instance_id():
     assert first != second
 
 
-def test_network_config_lowercases_mac_and_names_eth0():
+def test_network_config_matches_mac_without_renaming():
     doc = yaml.safe_load(seed.render_network_config("BC:24:11:AA:BB:CC"))
-    assert doc["version"] == 1
-    [nic] = doc["config"]
-    assert nic == {
-        "type": "physical",
-        "name": "eth0",
-        "mac_address": "bc:24:11:aa:bb:cc",
-        "subnets": [{"type": "dhcp4"}],
+    assert doc == {
+        "version": 2,
+        "ethernets": {
+            "nic0": {
+                "match": {"macaddress": "bc:24:11:aa:bb:cc"},
+                "dhcp4": True,
+                "dhcp-identifier": "mac",
+            }
+        },
     }
 
 

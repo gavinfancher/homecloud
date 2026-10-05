@@ -38,21 +38,22 @@ def render_meta_data(*, hostname: str, instance_id: str | None = None) -> str:
 
 
 def render_network_config(mac: str) -> str:
-    """DHCP on the VM's NIC, named ``eth0`` — the same layout Proxmox generates.
+    """DHCP on the VM's NIC, matched by MAC and left under its kernel name.
 
-    The cloud-init specs write netplan overrides for ``eth0``, so keeping the
-    name matters; matching on the MAC pins it to the right interface.
+    Renaming it (to ``eth0``) fails on current images, where the NIC is
+    already up as ``ens18`` by the time cloud-init runs.  The DHCP client
+    identifier is keyed off the MAC rather than ``/etc/machine-id``, so clones
+    can never collide on a lease even if a machine-id slips through.
     """
     doc = {
-        "version": 1,
-        "config": [
-            {
-                "type": "physical",
-                "name": "eth0",
-                "mac_address": mac.lower(),
-                "subnets": [{"type": "dhcp4"}],
+        "version": 2,
+        "ethernets": {
+            "nic0": {
+                "match": {"macaddress": mac.lower()},
+                "dhcp4": True,
+                "dhcp-identifier": "mac",
             }
-        ],
+        },
     }
     return yaml.safe_dump(doc, sort_keys=False)
 

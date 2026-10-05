@@ -27,7 +27,6 @@ def test_bake_user_data_has_agent_tailscale_keys_and_packages():
     doc = _load(bake_user_data(ssh_keys=[KEY], packages=["tmux", "qemu-guest-agent"]))
     assert doc["ssh_authorized_keys"] == [KEY]
     assert doc["packages"] == ["qemu-guest-agent", "tmux"]
-    assert doc["write_files"][0]["content"].count("dhcp-identifier: mac") == 1
     runcmd = [" ".join(c) for c in doc["runcmd"]]
     assert "systemctl enable --now qemu-guest-agent" in runcmd
     assert any("tailscale.com/install.sh" in c for c in runcmd)

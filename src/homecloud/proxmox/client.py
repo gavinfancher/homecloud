@@ -290,6 +290,10 @@ class ProxmoxClient:
     def resize_disk(self, vmid: int, disk: str, size_gb: int) -> None:
         self._api.nodes(self.node).qemu(vmid).resize.put(disk=disk, size=f"+{size_gb}G")
 
+    def grow_disk(self, vmid: int, disk: str, target_gb: int) -> None:
+        """Grow *disk* to *target_gb*; never shrinks (Proxmox can't)."""
+        self._api.nodes(self.node).qemu(vmid).resize.put(disk=disk, size=f"{target_gb}G")
+
     def set_resources(self, vmid: int, *, cores: int, memory_mb: int) -> None:
         self._api.nodes(self.node).qemu(vmid).config.put(cores=cores, memory=memory_mb)
 
