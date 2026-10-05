@@ -33,7 +33,7 @@ export function Settings() {
     setSaving(true)
     try {
       await api.saveSetup(keys)
-      toast.success('SSH keys saved — rebuild the base image to apply')
+      toast.success('SSH keys saved — rebuild the base image to apply them')
       setNewKeys('')
       load()
       refresh()
@@ -103,7 +103,7 @@ export function Settings() {
               value={newKeys}
               onChange={(e) => setNewKeys(e.target.value)}
             />
-            <small className="hint">One key per line. Keys are baked into new images.</small>
+            <small className="hint">One key per line. Keys are baked into base images built after saving.</small>
           </label>
 
           <p className="note-line">

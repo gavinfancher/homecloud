@@ -1,6 +1,24 @@
-"""Postgres persistence for the image catalog and custom image definitions."""
+"""Postgres persistence — all controller state lives here."""
 
-from homecloud.db.models import Base, CloudImage, CustomImage
-from homecloud.db.session import db_enabled, init_db, session_scope
+from homecloud.db.models import (
+    Base,
+    BaseImage,
+    BaseImageConfig,
+    Instance,
+    Job,
+    JobLog,
+    SshKey,
+)
+from homecloud.db.session import init_db, session_scope
 
-__all__ = ["Base", "CloudImage", "CustomImage", "db_enabled", "init_db", "session_scope"]
+__all__ = [
+    "Base",
+    "BaseImage",
+    "BaseImageConfig",
+    "Instance",
+    "Job",
+    "JobLog",
+    "SshKey",
+    "init_db",
+    "session_scope",
+]

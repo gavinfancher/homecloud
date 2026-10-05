@@ -1,11 +1,23 @@
-.venv
+# Only pyproject.toml, uv.lock and src/ are needed by infra/docker/Dockerfile.
 .git
-.homecloud
-__pycache__
-*.pyc
-.pytest_cache
-.env
+.github
 .gitignore
+.dockerignore
+.DS_Store
+.venv
+.homecloud
+.env
+.env.*
+.ruff_cache
+.pytest_cache
+**/__pycache__
+**/*.py[cod]
+.claude
+.agents
 
-infra/caddy
-infra/systemd
+docs
+tests
+frontend
+infra
+ssh
+scripts

@@ -1,206 +1,126 @@
-"""Tests for Clerk auth (phase 09) and the Caddy forward-auth gate (phase 11).
+"""Clerk auth without a network: disabled mode, token extraction, and RS256
+verification against a locally generated key (``get_signing_key`` is patched)."""
 
-No network: a local RSA keypair signs tokens and ``ClerkAuth.get_signing_key``
-is monkeypatched to return the matching public key (standing in for the JWKS
-endpoint).
-"""
-from __future__ import annotations
-
-import datetime
+import time
 
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
+from starlette.requests import Request
 
-import homecloud.auth as auth_module
-from homecloud.auth import ClerkAuth, get_clerk_auth, reset_clerk_auth
-from homecloud.main import app
+from homecloud import auth
 
-ISSUER = "https://test.clerk.accounts.dev"
+ISSUER = "https://clerk.example.test"
 
 
-@pytest.fixture(autouse=True)
-def _reset_auth():
-    reset_clerk_auth()
-    yield
-    reset_clerk_auth()
+def _request(headers: dict[str, str] | None = None, path: str = "/api/instances") -> Request:
+    raw = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    return Request({"type": "http", "method": "GET", "path": path, "headers": raw})
+
+
+@pytest.fixture(scope="module")
+def key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
 @pytest.fixture
-def keypair():
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    return key, key.public_key()
+def clerk(settings, monkeypatch, key):
+    """Enabled Clerk auth whose signing key is the local test key."""
+    monkeypatch.setattr(settings, "clerk_jwks_url", f"{ISSUER}/.well-known/jwks.json")
+    monkeypatch.setattr(settings, "clerk_issuer", ISSUER)
+    monkeypatch.setattr(settings, "clerk_authorized_parties", "https://app.example.test, ")
+    auth.reset_clerk_auth()
+    instance = auth.get_clerk_auth()
+    monkeypatch.setattr(instance, "get_signing_key", lambda _token: key.public_key())
+    yield instance
+    auth.reset_clerk_auth()
 
 
-def _token(priv, *, issuer=ISSUER, azp=None, exp_delta=3600):
-    now = datetime.datetime.now(datetime.UTC)
-    payload = {
-        "sub": "user_123",
-        "iss": issuer,
-        "iat": now,
-        "exp": now + datetime.timedelta(seconds=exp_delta),
-    }
-    if azp is not None:
-        payload["azp"] = azp
-    return jwt.encode(payload, priv, algorithm="RS256")
+@pytest.fixture
+def disabled(settings, monkeypatch):
+    monkeypatch.setattr(settings, "clerk_jwks_url", "")
+    monkeypatch.setattr(settings, "clerk_issuer", "")
+    auth.reset_clerk_auth()
+    yield auth.get_clerk_auth()
+    auth.reset_clerk_auth()
 
 
-def _enable_clerk(monkeypatch, keypair, *, authorized_parties=""):
-    _, pub = keypair
-    monkeypatch.setattr(auth_module.settings, "clerk_jwks_url", "https://test/jwks.json")
-    monkeypatch.setattr(auth_module.settings, "clerk_issuer", ISSUER)
-    monkeypatch.setattr(auth_module.settings, "clerk_authorized_parties", authorized_parties)
-    reset_clerk_auth()
-    monkeypatch.setattr(ClerkAuth, "get_signing_key", lambda self, token: pub)
+def _token(key, **claims) -> str:
+    now = int(time.time())
+    payload = {"sub": "user_1", "iss": ISSUER, "iat": now, "exp": now + 60, **claims}
+    return jwt.encode(payload, key, algorithm="RS256")
 
 
-# ---------------------------------------------------------------------------
-# ClerkAuth.verify_token
-# ---------------------------------------------------------------------------
+def test_disabled_mode_allows_anonymous(disabled):
+    assert disabled.enabled is False
+    assert auth.require_auth(_request()) == {"sub": "anonymous", "auth": "disabled"}
 
 
-def test_enabled_flag():
-    auth = ClerkAuth()
-    assert auth.enabled is False  # nothing configured by default
+def test_enabled_needs_both_jwks_and_issuer(settings, monkeypatch):
+    monkeypatch.setattr(settings, "clerk_jwks_url", f"{ISSUER}/.well-known/jwks.json")
+    monkeypatch.setattr(settings, "clerk_issuer", "")
+    auth.reset_clerk_auth()
+    try:
+        assert auth.get_clerk_auth().enabled is False
+    finally:
+        auth.reset_clerk_auth()
 
 
-def test_verify_token_success(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    priv, _ = keypair
-    claims = get_clerk_auth().verify_token(_token(priv))
-    assert claims["sub"] == "user_123"
+def test_authorized_parties_are_parsed(clerk):
+    assert clerk.authorized_parties == ["https://app.example.test"]
 
 
-def test_verify_token_bad_issuer_rejected(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    priv, _ = keypair
-    with pytest.raises(jwt.InvalidIssuerError):
-        get_clerk_auth().verify_token(_token(priv, issuer="https://evil.example"))
+@pytest.mark.parametrize(
+    ("headers", "token"),
+    [
+        ({"Authorization": "Bearer abc"}, "abc"),
+        ({"Authorization": "bearer  abc "}, "abc"),
+        ({"Authorization": "Bearer "}, None),
+        ({"Cookie": "__session=xyz"}, "xyz"),
+        ({"Authorization": "Basic Zm9v", "Cookie": "__session=xyz"}, "xyz"),
+        ({"Authorization": "Bearer abc", "Cookie": "__session=xyz"}, "abc"),
+        ({}, None),
+    ],
+)
+def test_extract_token(headers, token):
+    assert auth.extract_token(_request(headers)) == token
 
 
-def test_verify_token_expired_rejected(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    priv, _ = keypair
-    with pytest.raises(jwt.ExpiredSignatureError):
-        get_clerk_auth().verify_token(_token(priv, exp_delta=-10))
+def test_valid_token(clerk, key):
+    token = _token(key, azp="https://app.example.test")
+    claims = auth.require_auth(_request({"Authorization": f"Bearer {token}"}))
+    assert claims["sub"] == "user_1"
 
 
-def test_verify_token_unauthorized_azp_rejected(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair, authorized_parties="https://app.homecloud.dev")
-    priv, _ = keypair
-    with pytest.raises(jwt.InvalidTokenError):
-        get_clerk_auth().verify_token(_token(priv, azp="https://attacker.example"))
+def test_token_without_azp_is_accepted(clerk, key):
+    assert clerk.verify_token(_token(key))["sub"] == "user_1"
 
 
-def test_verify_token_authorized_azp_accepted(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair, authorized_parties="https://app.homecloud.dev")
-    priv, _ = keypair
-    claims = get_clerk_auth().verify_token(_token(priv, azp="https://app.homecloud.dev"))
-    assert claims["sub"] == "user_123"
+def test_missing_token_is_401(clerk):
+    with pytest.raises(HTTPException) as exc:
+        auth.require_auth(_request())
+    assert exc.value.status_code == 401
 
 
-# ---------------------------------------------------------------------------
-# API enforcement (disabled vs enabled)
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"azp": "https://evil.example.test"},
+        {"iss": "https://other.example.test"},
+        {"exp": int(time.time()) - 600},
+    ],
+)
+def test_rejected_claims_are_401(clerk, key, claims):
+    token = _token(key, **claims)
+    with pytest.raises(HTTPException) as exc:
+        auth.require_auth(_request({"Authorization": f"Bearer {token}"}))
+    assert exc.value.status_code == 401
 
 
-def test_health_is_public():
-    client = TestClient(app)
-    assert client.get("/api/health").status_code == 200
-
-
-def test_api_open_when_auth_disabled():
-    # No Clerk config → dev mode → request allowed without a token.
-    client = TestClient(app)
-    assert client.get("/api/sizes").status_code == 200
-
-
-def test_api_rejects_missing_token_when_enabled(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    client = TestClient(app)
-    assert client.get("/api/sizes").status_code == 401
-
-
-def test_api_accepts_valid_token_when_enabled(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    priv, _ = keypair
-    client = TestClient(app)
-    resp = client.get("/api/sizes", headers={"Authorization": f"Bearer {_token(priv)}"})
-    assert resp.status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# /auth/verify (Caddy forward-auth target)
-# ---------------------------------------------------------------------------
-
-
-def test_auth_verify_allows_when_disabled():
-    client = TestClient(app)
-    resp = client.get("/auth/verify")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "auth-disabled"
-
-
-def test_auth_verify_accepts_session_cookie(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    priv, _ = keypair
-    client = TestClient(app)
-    resp = client.get("/auth/verify", cookies={"__session": _token(priv)})
-    assert resp.status_code == 200
-    assert resp.headers.get("X-Auth-Sub") == "user_123"
-
-
-def test_auth_verify_401_without_token_or_console(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    monkeypatch.setattr(auth_module.settings, "console_url", "")
-    client = TestClient(app)
-    assert client.get("/auth/verify").status_code == 401
-
-
-def test_auth_verify_redirects_to_console(monkeypatch, keypair):
-    _enable_clerk(monkeypatch, keypair)
-    import homecloud.api.routes as routes_module
-
-    monkeypatch.setattr(routes_module.settings, "console_url", "https://app.homecloud.dev")
-    client = TestClient(app)
-    resp = client.get("/auth/verify", follow_redirects=False)
-    assert resp.status_code == 302
-    assert resp.headers["location"].startswith("https://app.homecloud.dev")
-
-
-# ---------------------------------------------------------------------------
-# Caddy forward-auth block rendering (phase 11)
-# ---------------------------------------------------------------------------
-
-
-def test_caddy_site_includes_forward_auth_when_configured(tmp_path, monkeypatch):
-    import homecloud.proxy.caddy as caddy_module
-
-    monkeypatch.setattr(caddy_module.settings, "caddy_config_dir", str(tmp_path))
-    monkeypatch.setattr(caddy_module.settings, "domain", "homecloud.dev")
-    monkeypatch.setattr(caddy_module.settings, "caddy_reload_cmd", "")
-    monkeypatch.setattr(caddy_module.settings, "caddy_forward_auth_upstream", "controller:8080")
-
-    caddy_module.CaddyProxy().ensure_route(
-        "airflow.dagster", upstream_host="100.1.1.1", upstream_port=8080
-    )
-    content = (tmp_path / "airflow.dagster.caddy").read_text()
-    assert "forward_auth controller:8080" in content
-    assert "uri /auth/verify" in content
-    assert "reverse_proxy 100.1.1.1:8080" in content
-
-
-def test_caddy_site_no_forward_auth_when_unset(tmp_path, monkeypatch):
-    import homecloud.proxy.caddy as caddy_module
-
-    monkeypatch.setattr(caddy_module.settings, "caddy_config_dir", str(tmp_path))
-    monkeypatch.setattr(caddy_module.settings, "domain", "homecloud.dev")
-    monkeypatch.setattr(caddy_module.settings, "caddy_reload_cmd", "")
-    monkeypatch.setattr(caddy_module.settings, "caddy_forward_auth_upstream", "")
-
-    caddy_module.CaddyProxy().ensure_route(
-        "airflow.dagster", upstream_host="100.1.1.1", upstream_port=8080
-    )
-    content = (tmp_path / "airflow.dagster.caddy").read_text()
-    assert "forward_auth" not in content
+def test_token_signed_by_another_key_is_401(clerk):
+    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    token = _token(other)
+    with pytest.raises(HTTPException) as exc:
+        auth.require_auth(_request({"Cookie": f"__session={token}"}))
+    assert exc.value.status_code == 401

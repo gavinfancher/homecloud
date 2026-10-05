@@ -9,8 +9,10 @@ import {
   IconScan,
 } from '../components/Icons'
 import { InstanceActions } from '../components/InstanceActions'
+import { ReconfigureModal } from '../components/ReconfigureModal'
 import { useToast } from '../components/Toast'
 import { CopyButton, EmptyState, Field, Mono, Pill } from '../components/ui'
+import { baseVersion } from '../lib/format'
 import { useStore } from '../lib/store'
 import { InstanceServices } from './InstanceServices'
 
@@ -95,9 +97,11 @@ export function Instances() {
 }
 
 function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: () => void }) {
-  const { api, refresh, openJob } = useStore()
+  const { api, refresh, openJob, roles } = useStore()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [reconfiguring, setReconfiguring] = useState(false)
+  const roleLabel = (id: string) => roles.find((r) => r.id === id)?.label ?? id
 
   async function act(fn: () => Promise<unknown>) {
     setBusy(true)
@@ -216,11 +220,47 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
                 </p>
               )}
             </section>
+
+            <section className="detail-block">
+              <div className="block-head">
+                <h4>Configuration</h4>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={vm.status !== 'running'}
+                  title={vm.status === 'running' ? undefined : 'Start the instance first'}
+                  onClick={() => setReconfiguring(true)}
+                >
+                  Reconfigure
+                </button>
+              </div>
+              <Field label="Base image">
+                {vm.base_image_id != null ? (
+                  <Mono>{baseVersion(vm.base_image_id)}</Mono>
+                ) : (
+                  <span className="muted" title="Created before versioned base images">
+                    legacy
+                  </span>
+                )}
+              </Field>
+              {vm.roles && vm.roles.length > 0 ? (
+                <div className="pkg-list">
+                  {vm.roles.map((r) => (
+                    <span className="pkg" key={r.id}>
+                      {roleLabel(r.id)}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted small">No roles recorded for this instance.</p>
+              )}
+            </section>
           </div>
 
           <InstanceServices vm={vm} />
         </div>
       )}
+
+      {reconfiguring && <ReconfigureModal vm={vm} onClose={() => setReconfiguring(false)} />}
     </div>
   )
 }

@@ -1,0 +1,8 @@
+label: Commands
+description: Shell commands run as root, in order, with bash. They run on every provision, so make them safe to repeat.
+order: 50
+vars:
+  - name: commands
+    label: Commands
+    type: list
+    default: []

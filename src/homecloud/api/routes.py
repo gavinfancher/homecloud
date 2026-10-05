@@ -1,46 +1,35 @@
 from __future__ import annotations
 
 import logging
-import threading
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from homecloud.access import ssh_config_block
 from homecloud.api.schemas import (
-    CloudImageRequest,
-    CustomImageRequest,
-    CustomImageUpdate,
+    BaseImageConfigRequest,
     DeployVMRequest,
+    ProvisionRequest,
     PublishServiceRequest,
     SetupRequest,
 )
 from homecloud.auth import extract_token, get_clerk_auth
 from homecloud.config import settings
-from homecloud.db.session import db_enabled
 from homecloud.dns.names import connection_info, private_fqdn
-from homecloud.images import store as image_store
-from homecloud.images.builder import ImageBuilder
-from homecloud.images.deployer import VMDeployer, VMManager
-from homecloud.images.registry import list_images
-from homecloud.images.store import ImageConflict, ImageNotFound
-from homecloud.jobs import JobCancelled, job_store
-from homecloud.ports import scan_ports
+from homecloud.images import base
+from homecloud.images.deployer import VMManager
+from homecloud.jobs import job_store
+from homecloud.provision.catalog import RoleError, list_roles, resolve_roles
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.publish import publish_web, unpublish_web
 from homecloud.sizes import list_sizes
 from homecloud.state import (
-    get_built_template,
     get_instance,
     get_ssh_public_keys,
-    hydrate_registry,
     is_setup_complete,
     list_registered_vms,
     save_setup,
-    set_built_template,
     set_instance_local_ip,
-    set_instance_ports,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +60,14 @@ def _local_ip(vm: dict, proxmox: ProxmoxClient | None) -> str:
 
 
 def _merge_registered(vms: list[dict], proxmox: ProxmoxClient | None = None) -> list[dict]:
+    """Registered instances only, each merged with its live Proxmox status.
+
+    Other VMs on the node (the control VM itself, anything made by hand) are
+    left out, so the console can never stop or delete them.
+    """
     registered = list_registered_vms()
+    managed = {r["vmid"] for r in registered.values()}
+    vms = [vm for vm in vms if vm.get("vmid") in managed]
     for vm in vms:
         name = vm.get("name", "")
         if name in registered:
@@ -154,7 +150,6 @@ def auth_verify(request: Request):
 
 @router.get("/dashboard")
 def dashboard() -> dict:
-    hydrate_registry()
     proxmox = ProxmoxClient()
     # Dashboard only needs counts — skip the guest-agent LAN IP probe.
     vms = _sort_vms(_merge_registered(proxmox.list_vms()))
@@ -162,7 +157,7 @@ def dashboard() -> dict:
     running = sum(1 for vm in vms if vm.get("status") == "running")
     return {
         "setup_complete": is_setup_complete(),
-        "base_image_built": get_built_template("homecloud-base") is not None,
+        "base_image_ready": base.current_build() is not None,
         "tailscale_tailnet": settings.tailscale_tailnet,
         "proxmox_node": settings.proxmox_node,
         "proxmox_storage": settings.proxmox_storage,
@@ -178,21 +173,16 @@ def dashboard() -> dict:
 
 @router.get("/setup")
 def setup_status() -> dict:
-    hydrate_registry()
     keys = get_ssh_public_keys()
     return {
         "setup_complete": is_setup_complete(),
-        "base_image_built": get_built_template("homecloud-base") is not None,
         "tailscale_tailnet": settings.tailscale_tailnet,
         "proxmox_node": settings.proxmox_node,
         "proxmox_storage": settings.proxmox_storage,
         "vm_ssh_user": settings.vm_ssh_user,
         "ssh_public_keys_count": len(keys),
         "ssh_public_keys": keys,
-        "rebuild_note": (
-            "Changing SSH keys only affects new images/instances. "
-            "A base-image rebuild is required to bake new keys into future VMs."
-        ),
+        "rebuild_note": "Changing SSH keys only affects base images built afterwards.",
     }
 
 
@@ -206,11 +196,7 @@ def complete_setup(body: SetupRequest) -> dict:
     return {
         "setup_complete": True,
         "ssh_public_keys_count": len(keys),
-        "rebuild_required": True,
-        "rebuild_note": (
-            "Changing SSH keys only affects new images/instances. "
-            "A base-image rebuild is required to bake new keys into future VMs."
-        ),
+        "rebuild_note": "Changing SSH keys only affects base images built afterwards.",
     }
 
 
@@ -228,170 +214,49 @@ def sizes_list() -> list[dict]:
     ]
 
 
-def _require_db() -> None:
-    if not db_enabled():
-        raise HTTPException(
-            503,
-            "Custom images need a database — set DATABASE_URL and start the postgres service",
+@router.get("/roles")
+def roles_list() -> list[dict]:
+    """The role catalog the create flow renders its configure step from."""
+    return list_roles()
+
+
+@router.get("/base-image")
+def base_image() -> dict:
+    """The editable base image definition, its builds, and the one deploys use."""
+    return {
+        "config": base.get_config(),
+        "current": base.current_build(),
+        "builds": base.list_builds(),
+    }
+
+
+@router.put("/base-image")
+def update_base_image(body: BaseImageConfigRequest) -> dict:
+    """Edit the definition. Takes effect on the next build, never on existing ones."""
+    try:
+        return base.update_config(
+            image_url=body.image_url,
+            packages=body.packages,
+            extra_user_data=body.extra_user_data,
         )
+    except base.BaseImageError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
-def _image_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, ImageNotFound):
-        return HTTPException(404, str(exc))
-    if isinstance(exc, ImageConflict):
-        return HTTPException(409, str(exc))
-    return HTTPException(400, str(exc))
-
-
-@router.get("/images")
-def images_list() -> list[dict]:
-    """Built-in registry images plus every custom image defined in the DB."""
-    hydrate_registry()
-    images = [
-        {
-            "id": img.id,
-            "name": img.name,
-            "description": img.description,
-            "kind": "builtin",
-            "cloud_image_id": None,
-            "built": (img.template_id or get_built_template(img.id)) is not None,
-            "status": (
-                "built" if (img.template_id or get_built_template(img.id)) else "draft"
-            ),
-            "template_id": img.template_id or get_built_template(img.id),
-            "default_cores": img.default_cores,
-            "default_memory_mb": img.default_memory_mb,
-            "default_disk_gb": img.default_disk_gb,
-            "packages": img.packages,
-            "config_files": [],
-            "run_commands": [],
-            "build_error": None,
-        }
-        for img in list_images()
-    ]
-    if db_enabled():
-        try:
-            images.extend(image_store.list_custom_images())
-        except Exception as exc:  # DB down — still serve the built-ins
-            logger.warning("Could not load custom images: %s", exc)
-    return images
-
-
-@router.get("/cloud-images")
-def cloud_images_list() -> list[dict]:
-    """Upstream distro cloud images available as a base layer."""
-    _require_db()
-    return image_store.list_cloud_images()
-
-
-@router.post("/cloud-images", status_code=201)
-def cloud_image_create(body: CloudImageRequest) -> dict:
-    _require_db()
+@router.post("/base-image/build")
+def build_base_image() -> dict:
+    """Build a new base image version from the current definition and SSH keys."""
     try:
-        return image_store.create_cloud_image(body.model_dump())
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.delete("/cloud-images/{cloud_image_id}")
-def cloud_image_delete(cloud_image_id: str) -> dict:
-    _require_db()
-    try:
-        return image_store.delete_cloud_image(cloud_image_id)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.post("/images", status_code=201)
-def image_create(body: CustomImageRequest) -> dict:
-    """Define a custom image. Creating it does not build it — POST …/build next."""
-    _require_db()
-    payload = body.model_dump()
-    payload["config_files"] = [f.model_dump(exclude_none=True) for f in body.config_files]
-    try:
-        return image_store.create_custom_image(payload)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.patch("/images/{image_id}")
-def image_update(image_id: str, body: CustomImageUpdate) -> dict:
-    _require_db()
-    changes = body.model_dump(exclude_unset=True)
-    if body.config_files is not None:
-        changes["config_files"] = [f.model_dump(exclude_none=True) for f in body.config_files]
-    if not changes:
-        raise HTTPException(400, "No fields to update")
-    try:
-        return image_store.update_custom_image(image_id, changes)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.delete("/images/{image_id}")
-def image_delete(image_id: str) -> dict:
-    _require_db()
-    try:
-        return image_store.delete_custom_image(image_id)
-    except (ImageNotFound, ImageConflict) as exc:
-        raise _image_error(exc) from exc
-
-
-@router.post("/images/homecloud-base/build")
-def build_image() -> dict:
-    if not is_setup_complete():
-        raise HTTPException(400, "Upload your SSH public key in setup first")
-    hydrate_registry()
-    job = job_store.create(
-        "build_image", label="homecloud-base", meta={"image_id": "homecloud-base"}
+        build_id = base.start_build()
+    except base.BaseImageError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    job = job_store.enqueue(
+        "build_base_image",
+        label=f"base image v{build_id}",
+        meta={"build_id": build_id},
+        payload={"build_id": build_id},
     )
-
-    def run() -> None:
-        job_store.start(job["id"])
-        builder = ImageBuilder()
-        try:
-            result = builder.build_builtin("homecloud-base", log=job_store.logger(job["id"]))
-            set_built_template("homecloud-base", result["template_id"])
-            job_store.complete(job["id"], result)
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
-    return {"job_id": job["id"]}
-
-
-@router.post("/images/{image_id}/build")
-def build_custom_image(image_id: str) -> dict:
-    """Bake a custom image into a Proxmox template. Returns a job to follow."""
-    _require_db()
-    if not is_setup_complete():
-        raise HTTPException(400, "Upload your SSH public key in setup first")
-
-    image = image_store.get_custom_image(image_id)
-    if image is None:
-        raise HTTPException(404, f"Unknown image: {image_id}")
-    if image["status"] == "building":
-        raise HTTPException(409, "Image is already building")
-
-    job = job_store.create("build_image", label=image_id, meta={"image_id": image_id})
-
-    def run() -> None:
-        job_store.start(job["id"])
-        try:
-            result = ImageBuilder().build_custom_image(
-                image_id,
-                log=job_store.logger(job["id"]),
-                cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
-            )
-            job_store.complete(job["id"], result)
-        except JobCancelled as exc:
-            job_store.cancelled(job["id"], str(exc))
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
-    return {"job_id": job["id"]}
+    return {"job_id": job["id"], "build_id": build_id}
 
 
 @router.get("/jobs")
@@ -445,8 +310,14 @@ def get_vm(vmid: int) -> dict:
 def deploy_vm(body: DeployVMRequest) -> dict:
     if not is_setup_complete():
         raise HTTPException(400, "Upload your SSH public key in setup first")
-    hydrate_registry()
-    job = job_store.create(
+    if get_instance(body.name) is not None:
+        raise HTTPException(409, f"An instance named {body.name!r} already exists")
+    roles = [r.model_dump() for r in body.roles]
+    try:
+        resolve_roles(roles)  # fail fast; the job resolves again
+    except RoleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    job = job_store.enqueue(
         "deploy_vm",
         label=body.name,
         meta={
@@ -455,40 +326,43 @@ def deploy_vm(body: DeployVMRequest) -> dict:
             "cores": body.cores,
             "memory_gb": body.memory_gb,
             "disk_gb": body.disk_gb,
-            "image_id": body.image_id,
+            "base_image_id": body.base_image_id,
+            "roles": [r["id"] for r in roles],
+        },
+        payload={
+            "name": body.name,
+            "size_id": body.size_id or "custom",
+            "cores": body.cores,
+            "memory_gb": body.memory_gb,
+            "disk_gb": body.disk_gb,
+            "base_image_id": body.base_image_id,
+            "roles": roles,
         },
     )
+    return {"job_id": job["id"]}
 
-    def run() -> None:
-        job_store.start(job["id"])
-        deployer = VMDeployer()
-        try:
-            result = deployer.deploy(
-                name=body.name,
-                size_id=body.size_id or "custom",
-                cores=body.cores,  # type: ignore[arg-type]
-                memory_gb=body.memory_gb,  # type: ignore[arg-type]
-                disk_gb=body.disk_gb,  # type: ignore[arg-type]
-                image_id=body.image_id,
-                log=job_store.logger(job["id"]),
-                cancel_check=lambda: job_store.is_cancel_requested(job["id"]),
-            )
-            job_store.complete(job["id"], result)
-        except JobCancelled as exc:
-            job_store.cancelled(job["id"], str(exc))
-        except (ValueError, TimeoutError) as exc:
-            job_store.fail(job["id"], str(exc))
-        except httpx.HTTPError as exc:
-            job_store.fail(job["id"], f"Tailscale API error: {exc}")
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
 
-    threading.Thread(target=run, daemon=True).start()
+@router.post("/vms/{name}/provision")
+def provision_vm(name: str, body: ProvisionRequest) -> dict:
+    """Re-run the role script on an existing instance with a new role selection."""
+    _require_instance(name)
+    roles = [r.model_dump() for r in body.roles]
+    try:
+        resolve_roles(roles)
+    except RoleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    job = job_store.enqueue(
+        "provision_vm",
+        label=name,
+        meta={"name": name, "roles": [r["id"] for r in roles]},
+        payload={"name": name, "roles": roles},
+    )
     return {"job_id": job["id"]}
 
 
 @router.post("/vms/{vmid}/start")
 def start_vm(vmid: int) -> dict:
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.start(vmid)
@@ -498,6 +372,7 @@ def start_vm(vmid: int) -> dict:
 
 @router.post("/vms/{vmid}/stop")
 def stop_vm(vmid: int) -> dict:
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.stop(vmid)
@@ -508,6 +383,7 @@ def stop_vm(vmid: int) -> dict:
 @router.post("/vms/{vmid}/suspend")
 def suspend_vm(vmid: int) -> dict:
     """Pause (suspend to RAM) a running instance."""
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.suspend(vmid)
@@ -518,6 +394,7 @@ def suspend_vm(vmid: int) -> dict:
 @router.post("/vms/{vmid}/resume")
 def resume_vm(vmid: int) -> dict:
     """Resume a previously suspended instance."""
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.resume(vmid)
@@ -526,28 +403,14 @@ def resume_vm(vmid: int) -> dict:
 
 
 @router.delete("/vms/{vmid}")
-def delete_vm(vmid: int, name: str | None = None) -> dict:
-    if not name:
-        for vm in ProxmoxClient().list_vms():
-            if vm.get("vmid") == vmid:
-                name = vm.get("name")
-                break
-    label = name or f"vm-{vmid}"
-    job = job_store.create("delete_vm", label=label, meta={"vmid": vmid, "name": name})
-
-    def run() -> None:
-        job_store.start(job["id"])
-        manager = VMManager()
-        log = job_store.logger(job["id"])
-        try:
-            log("info", f"Deleting {label}…")
-            result = manager.delete(vmid, name=name, log=log)
-            job_store.complete(job["id"], result)
-            log("info", f"Deleted {label}")
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
+def delete_vm(vmid: int) -> dict:
+    name = _require_managed(vmid)["name"]
+    job = job_store.enqueue(
+        "delete_vm",
+        label=name,
+        meta={"vmid": vmid, "name": name},
+        payload={"name": name},
+    )
     return {"job_id": job["id"]}
 
 
@@ -564,11 +427,19 @@ def ssh_config_export() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _require_managed(vmid: int) -> dict:
+    """The registered instance with *vmid*, or 404 — other VMs are off limits."""
+    for instance in list_registered_vms().values():
+        if instance["vmid"] == vmid:
+            return instance
+    raise HTTPException(404, f"VM {vmid} is not a homecloud instance")
+
+
 def _require_instance(name: str) -> dict:
-    """Return the registered state record for *name* or raise HTTP 404."""
+    """Return the registered record for *name* or raise HTTP 404."""
     instance = get_instance(name)
     if instance is None:
-        raise HTTPException(404, f"Instance '{name}' not found in state")
+        raise HTTPException(404, f"Instance '{name}' is not registered")
     return instance
 
 
@@ -576,43 +447,28 @@ def _require_instance(name: str) -> dict:
 def scan_ports_route(name: str) -> dict:
     """Create a background job that scans listening TCP ports on *name*.
 
-    The job persists results to ``state.vms[name].ports_seen`` on completion.
+    The job stores results on the instance (``ports_seen``) on completion.
     Returns ``{job_id}`` immediately.
     """
     instance = _require_instance(name)
-    job = job_store.create(
+    job = job_store.enqueue(
         "scan_ports",
         label=name,
-        meta={"instance": name, "tailscale_ip": instance.get("tailscale_ip", "")},
+        meta={"instance": name, "tailscale_ip": instance.get("tailscale_ip") or ""},
+        payload={"name": name},
     )
-
-    def run() -> None:
-        job_store.start(job["id"])
-        log = job_store.logger(job["id"])
-        try:
-            log("info", f"Starting port scan for {name} ({instance.get('tailscale_ip', 'no-ip')})")
-            # Re-read instance in case state changed between request and thread start.
-            current = get_instance(name) or instance
-            ports = scan_ports(current)
-            set_instance_ports(name, ports)
-            log("info", f"Found {len(ports)} listening port(s)")
-            job_store.complete(job["id"], {"ports": ports, "count": len(ports)})
-        except Exception as exc:
-            job_store.fail(job["id"], str(exc))
-
-    threading.Thread(target=run, daemon=True).start()
     return {"job_id": job["id"]}
 
 
 @router.get("/vms/{name}/ports")
 def get_ports(name: str) -> dict:
-    """Return last port-scan results for *name* from state.
+    """Return the last port-scan results for *name*.
 
     Run ``POST /api/vms/{name}/scan-ports`` first to populate this.
     """
     instance = _require_instance(name)
     return {
-        "ports_seen": instance.get("ports_seen", []),
+        "ports_seen": instance.get("ports_seen") or [],
         "ports_scanned_at": instance.get("ports_scanned_at"),
     }
 
@@ -622,7 +478,7 @@ def publish_service(name: str, body: PublishServiceRequest) -> dict:
     """Publish *body.port* on instance *name* as a named web service.
 
     Calls ``publish_web`` (Caddy site file + optional Cloudflare CNAME) and
-    persists the entry under ``state.vms[name].web``.
+    persists the entry on the instance's ``web`` list.
 
     The ``service`` field must match ``^[a-z][a-z0-9-]{1,30}$`` (validated by
     the schema).  The ``port`` must appear in ``ports_seen`` unless
@@ -632,7 +488,7 @@ def publish_service(name: str, body: PublishServiceRequest) -> dict:
 
     # Port must have been seen in a recent scan (unless overridden).
     if not body.force:
-        seen_ports = {p["port"] for p in instance.get("ports_seen", [])}
+        seen_ports = {p["port"] for p in instance.get("ports_seen") or []}
         if body.port not in seen_ports:
             raise HTTPException(
                 400,
@@ -640,11 +496,11 @@ def publish_service(name: str, body: PublishServiceRequest) -> dict:
                 "Run POST /api/vms/{name}/scan-ports first, or set force=true to bypass.",
             )
 
-    upstream_host: str = instance.get("tailscale_ip", "")
+    upstream_host: str = instance.get("tailscale_ip") or ""
     if not upstream_host:
         raise HTTPException(
             400,
-            f"Instance '{name}' has no tailscale_ip recorded in state; "
+            f"Instance '{name}' has no tailscale_ip recorded; "
             "ensure the VM has joined the tailnet before publishing.",
         )
 

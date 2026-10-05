@@ -31,7 +31,10 @@ export interface VM {
   ip?: string
   ssh?: string
   size_id?: string
-  image_id?: string
+  /** Base image build the instance was cloned from; null for legacy instances. */
+  base_image_id?: number | null
+  tailscale_device_id?: string | null
+  roles?: RoleSelection[]
   web?: WebService[]
   ports_seen?: SeenPort[]
   ports_scanned_at?: string | null
@@ -45,60 +48,72 @@ export interface Size {
   disk_gb: number
 }
 
-export interface ConfigFile {
+export type BuildStatus = 'building' | 'ready' | 'failed'
+
+/** The single editable base image definition; takes effect on the next build. */
+export interface BaseImageConfig {
+  image_url: string
+  packages: string[]
+  extra_user_data: string
+  updated_at: string | null
+}
+
+/** One versioned build: a snapshot of the config + SSH keys and its own template. */
+export interface BaseImageBuild {
+  id: number
+  status: BuildStatus
+  image_url: string
+  sha256: string | null
+  ssh_keys: string[]
+  packages: string[]
+  extra_user_data: string
+  template_vmid: number | null
+  error: string | null
+  created_at: string | null
+  built_at: string | null
+}
+
+export interface BaseImageState {
+  config: BaseImageConfig
+  /** Newest ready build — what new instances clone. */
+  current: BaseImageBuild | null
+  /** Newest first. */
+  builds: BaseImageBuild[]
+}
+
+export type RoleVarType = 'string' | 'text' | 'list' | 'bool' | 'files'
+
+export interface RoleFile {
   path: string
   content: string
-  permissions?: string | null
+  mode?: string | null
   owner?: string | null
 }
 
-export type ImageStatus = 'draft' | 'building' | 'built' | 'failed'
+export type RoleVarValue = string | boolean | string[] | RoleFile[]
 
-export interface Image {
-  id: string
+export interface RoleVar {
   name: string
+  label: string
+  type: RoleVarType
+  default: RoleVarValue | null
   description: string
-  kind: 'builtin' | 'custom'
-  cloud_image_id: string | null
-  built: boolean
-  status: ImageStatus
-  template_id: number | null
-  default_cores: number
-  default_memory_mb: number
-  default_disk_gb: number
-  packages: string[]
-  config_files: ConfigFile[]
-  run_commands: string[]
-  build_error: string | null
 }
 
-export interface CloudImage {
+/** A role from the controller's catalog, applied by cloud-init / the guest agent. */
+export interface RoleSpec {
   id: string
-  name: string
-  distro: string
-  version: string
-  arch: string
-  url: string
-  sha256: string | null
-  ssh_user: string
-  builtin: boolean
-  template_id: number | null
-  imported: boolean
-  imported_at: string | null
+  label: string
+  description: string
+  required: boolean
+  default_enabled: boolean
+  order: number
+  vars: RoleVar[]
 }
 
-/** Body for creating a custom image. */
-export interface CustomImageBody {
+export interface RoleSelection {
   id: string
-  name: string
-  description: string
-  cloud_image_id: string
-  packages: string[]
-  config_files: ConfigFile[]
-  run_commands: string[]
-  default_cores: number
-  default_memory_mb: number
-  default_disk_gb: number
+  vars: Record<string, RoleVarValue>
 }
 
 export interface JobLog {
@@ -112,6 +127,7 @@ export interface Job {
   type: string
   label: string
   status: string
+  meta?: Record<string, unknown>
   logs: JobLog[]
   result: unknown
   error: string | null
@@ -123,7 +139,7 @@ export interface Job {
 
 export interface Dashboard {
   setup_complete: boolean
-  base_image_built: boolean
+  base_image_ready: boolean
   tailscale_tailnet: string
   proxmox_node: string
   proxmox_storage?: string
@@ -133,7 +149,6 @@ export interface Dashboard {
 
 export interface SetupStatus {
   setup_complete: boolean
-  base_image_built: boolean
   tailscale_tailnet: string
   proxmox_node: string
   proxmox_storage: string
@@ -154,7 +169,9 @@ export interface DeployBody {
   cores?: number
   memory_gb?: number
   disk_gb?: number
-  image_id?: string
+  /** Omit to use the current base image build. */
+  base_image_id?: number
+  roles: RoleSelection[]
 }
 
 export const REQUEST_TIMEOUT_MS = 45_000
@@ -226,18 +243,19 @@ export function createApi(getToken: TokenGetter) {
     listVms: () => req<VM[]>('/api/vms'),
     getVm: (vmid: number) => req<VM>(`/api/vms/${vmid}`),
     sizes: () => req<Size[]>('/api/sizes'),
-    images: () => req<Image[]>('/api/images'),
-    buildBaseImage: () => req<{ job_id: string }>('/api/images/homecloud-base/build', { method: 'POST' }),
-    cloudImages: () => req<CloudImage[]>('/api/cloud-images'),
-    createImage: (body: CustomImageBody) =>
-      req<Image>('/api/images', { method: 'POST', body: JSON.stringify(body) }),
-    updateImage: (id: string, body: Partial<CustomImageBody>) =>
-      req<Image>(`/api/images/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    deleteImage: (id: string) => req<{ deleted: string }>(`/api/images/${id}`, { method: 'DELETE' }),
-    buildImage: (id: string) =>
-      req<{ job_id: string }>(`/api/images/${id}/build`, { method: 'POST' }),
+    roles: () => req<RoleSpec[]>('/api/roles'),
+    baseImage: () => req<BaseImageState>('/api/base-image'),
+    saveBaseImage: (config: Pick<BaseImageConfig, 'image_url' | 'packages' | 'extra_user_data'>) =>
+      req<BaseImageConfig>('/api/base-image', { method: 'PUT', body: JSON.stringify(config) }),
+    buildBaseImage: () =>
+      req<{ job_id: string; build_id: number }>('/api/base-image/build', { method: 'POST' }),
     deploy: (body: DeployBody) =>
       req<{ job_id: string }>('/api/vms', { method: 'POST', body: JSON.stringify(body) }),
+    provision: (name: string, roles: RoleSelection[]) =>
+      req<{ job_id: string }>(`/api/vms/${name}/provision`, {
+        method: 'POST',
+        body: JSON.stringify({ roles }),
+      }),
     listJobs: (limit = 30) => req<Job[]>(`/api/jobs?limit=${limit}`),
     job: (id: string) => req<Job>(`/api/jobs/${id}`),
     cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: 'POST' }),
@@ -245,10 +263,7 @@ export function createApi(getToken: TokenGetter) {
     stop: (vmid: number) => req(`/api/vms/${vmid}/stop`, { method: 'POST' }),
     suspend: (vmid: number) => req(`/api/vms/${vmid}/suspend`, { method: 'POST' }),
     resume: (vmid: number) => req(`/api/vms/${vmid}/resume`, { method: 'POST' }),
-    remove: (vmid: number, name?: string) =>
-      req<{ job_id: string }>(`/api/vms/${vmid}${name ? `?name=${encodeURIComponent(name)}` : ''}`, {
-        method: 'DELETE',
-      }),
+    remove: (vmid: number) => req<{ job_id: string }>(`/api/vms/${vmid}`, { method: 'DELETE' }),
     scanPorts: (name: string) =>
       req<{ job_id: string }>(`/api/vms/${name}/scan-ports`, { method: 'POST' }),
     ports: (name: string) => req<PortsResult>(`/api/vms/${name}/ports`),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 import httpx
 
@@ -76,35 +77,47 @@ class TailscaleClient:
 
     def get_device_ip(self, hostname: str) -> str | None:
         device = self.get_device_by_hostname(hostname)
-        if not device:
-            return None
+        return self.tailnet_ip(device) if device else None
+
+    @staticmethod
+    def tailnet_ip(device: dict) -> str | None:
         for addr in device.get("addresses", []):
             ip = addr.split("/")[0]
             if ip.startswith("100."):
                 return ip
         return None
 
-    def create_reusable_auth_key(
-        self,
-        *,
-        description: str = "homecloud-vm",
-        tags: list[str] | None = None,
-        expiry_seconds: int = 86400 * 90,
-    ) -> str:
-        """Create a pre-auth key for cloud-init. Requires API key with key creation scope."""
-        payload: dict = {
-            "capabilities": {
-                "devices": {
-                    "create": {
-                        "reusable": True,
-                        "ephemeral": False,
-                        "preauthorized": True,
-                        "tags": tags or ["tag:homecloud"],
-                    }
-                }
-            },
+    def find_new_device(self, hostname: str, *, since: datetime) -> dict | None:
+        """The device named *hostname* that joined at or after *since*.
+
+        A stale device with the same name (a VM deleted without its tailnet
+        cleanup) would otherwise be matched; the newest new one wins.
+        """
+        matches = []
+        for device in self.list_devices():
+            if device.get("hostname") != hostname:
+                continue
+            created = device.get("created")
+            if not created:
+                continue
+            joined = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            if joined >= since:
+                matches.append((joined, device))
+        return max(matches, key=lambda m: m[0])[1] if matches else None
+
+    def create_vm_auth_key(self, hostname: str, *, expiry_seconds: int = 3600) -> str:
+        """A single-use, pre-authorized key for one VM's first boot.
+
+        It reaches the VM on the cloud-init seed, so it is short-lived and
+        spent on first use; the seed itself is deleted once cloud-init is done.
+        """
+        # Untagged: the VM is owned by the API key's user, like a device you
+        # added yourself.
+        create = {"reusable": False, "ephemeral": False, "preauthorized": True}
+        payload = {
+            "capabilities": {"devices": {"create": create}},
             "expirySeconds": expiry_seconds,
-            "description": description,
+            "description": f"homecloud {hostname}"[:50],
         }
         resp = self._request("POST", f"/tailnet/{self.tailnet}/keys", json=payload)
         return resp.json()["key"]

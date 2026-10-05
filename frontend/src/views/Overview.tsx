@@ -22,14 +22,13 @@ export function Overview() {
 
   return (
     <div className="view">
-      {dashboard && !dashboard.base_image_built && (
+      {dashboard && !dashboard.base_image_ready && (
         <div className="callout callout-warn">
           <div>
-            <strong>Base image not built.</strong> Build the <code>homecloud-base</code> template
-            before creating instances.
+            <strong>No base image built yet.</strong> Build one before creating instances.
           </div>
-          <button className="btn btn-sm" onClick={() => navigate('/images')}>
-            Go to Images
+          <button className="btn btn-sm" onClick={() => navigate('/base-image')}>
+            Go to Base image
           </button>
         </div>
       )}
@@ -58,8 +57,8 @@ export function Overview() {
             <Row
               label="Base image"
               value={
-                <Pill status={dashboard?.base_image_built ? 'completed' : 'failed'}>
-                  {dashboard?.base_image_built ? 'Built' : 'Not built'}
+                <Pill status={dashboard?.base_image_ready ? 'completed' : 'failed'}>
+                  {dashboard?.base_image_ready ? 'Ready' : 'Not built'}
                 </Pill>
               }
             />

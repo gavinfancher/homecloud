@@ -1,22 +1,14 @@
 """Port discovery for homecloud instances.
 
-Preferred transport: SSH to the instance's Tailscale IP, running
-``ss -H -tlnp`` (with process names when root) or ``ss -H -tln`` (fallback).
-
-Fallback transport: Proxmox QEMU guest-agent ``exec``.
+Runs ``ss -H -tlnp`` in the guest through the Proxmox QEMU guest agent — no
+SSH. The agent runs commands as root, so process names are included.
 
 The ``parse_ss_output`` function is intentionally pure (no I/O) so it can
 be unit-tested without any network access.
 """
 from __future__ import annotations
 
-import logging
 import re
-import subprocess
-
-from homecloud.config import settings
-
-logger = logging.getLogger(__name__)
 
 # Loopback addresses that indicate a port cannot be directly proxied.
 _LOOPBACK_ADDRS = frozenset({"127.0.0.1", "::1"})
@@ -103,7 +95,10 @@ def parse_ss_output(text: str) -> list[dict]:
             if m:
                 proc = m.group(1)
 
-        publishable = address not in _LOOPBACK_ADDRS
+        # ss appends the interface to scoped binds (127.0.0.53%lo).
+        publishable = address.split("%")[0] not in _LOOPBACK_ADDRS and not address.startswith(
+            "127."
+        )
         entry: dict = {
             "port": port,
             "proc": proc,
@@ -119,93 +114,19 @@ def parse_ss_output(text: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Transport layer — SSH preferred, guest_exec fallback
+# Transport — the guest agent
 # ---------------------------------------------------------------------------
 
 
 def scan_ports(instance: dict) -> list[dict]:
-    """Scan listening TCP ports on *instance*.
+    """Scan listening TCP ports on *instance* (needs ``vmid``).
 
-    Args:
-        instance: Instance state dict; must contain ``tailscale_ip`` and/or
-                  ``vmid``.  Extra keys are ignored.
-
-    Returns:
-        List of port dicts as returned by :func:`parse_ss_output`.
-        Returns an empty list when all transports fail (non-fatal).
+    Raises when the guest agent cannot run the command, so the job shows why.
     """
-    tailscale_ip: str | None = instance.get("tailscale_ip")
-    vmid: int | str | None = instance.get("vmid")
-    name: str = instance.get("name", "<unknown>")
-
-    if tailscale_ip and settings.vm_ssh_user:
-        try:
-            ports = _scan_via_ssh(tailscale_ip)
-            logger.info("SSH port scan succeeded for %s: %d ports", name, len(ports))
-            return ports
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "SSH port scan failed for %s (%s): %s; trying guest_exec",
-                name,
-                tailscale_ip,
-                exc,
-            )
-
-    if vmid is not None:
-        try:
-            ports = _scan_via_guest_exec(int(vmid))
-            logger.info(
-                "guest_exec port scan succeeded for %s (vmid=%s): %d ports",
-                name,
-                vmid,
-                len(ports),
-            )
-            return ports
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "guest_exec port scan failed for %s (vmid=%s): %s",
-                name,
-                vmid,
-                exc,
-            )
-
-    logger.error(
-        "Port scan failed: no reachable transport for instance %s", name
-    )
-    return []
-
-
-def _scan_via_ssh(tailscale_ip: str) -> list[dict]:
-    """SSH into *tailscale_ip* and run ``ss``."""
-    user = settings.vm_ssh_user
-    # Try privileged scan first (includes process names); fall back gracefully
-    # within the remote shell if the user is not root.
-    remote_cmd = "ss -H -tlnp 2>/dev/null || ss -H -tln"
-    result = subprocess.run(
-        [
-            "ssh",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=10",
-            f"{user}@{tailscale_ip}",
-            remote_cmd,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ssh exited {result.returncode}: {result.stderr.strip()}"
-        )
-    return parse_ss_output(result.stdout)
-
-
-def _scan_via_guest_exec(vmid: int) -> list[dict]:
-    """Use Proxmox QEMU guest agent to run ``ss -H -tln``."""
     # Import lazily so the module can be imported without a Proxmox connection.
     from homecloud.proxmox.client import ProxmoxClient  # noqa: PLC0415
 
-    client = ProxmoxClient()
-    output = client.guest_exec(vmid, ["ss", "-H", "-tln"])
-    return parse_ss_output(output)
+    result = ProxmoxClient().guest_run(int(instance["vmid"]), ["ss", "-H", "-tlnp"], timeout=60)
+    if result["exitcode"] != 0:
+        raise RuntimeError(f"ss failed in the guest: {result['err'].strip() or result['exitcode']}")
+    return parse_ss_output(result["out"])

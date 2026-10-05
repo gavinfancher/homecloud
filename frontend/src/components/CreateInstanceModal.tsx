@@ -1,5 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { RoleSelection } from '../api'
 import { IconClose, IconSettings } from './Icons'
+import { RoleEditor, defaultSelection, selectionValid } from './RoleEditor'
+import { baseVersion, relativeTime } from '../lib/format'
 import { useStore } from '../lib/store'
 import { useToast } from './Toast'
 
@@ -12,16 +16,27 @@ const LIMITS = {
 const CUSTOM = 'custom'
 
 export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
-  const { api, sizes, images, dashboard, refresh, openJob } = useStore()
+  const { api, sizes, baseImage, refreshBaseImage, roles, refresh, openJob } = useStore()
   const toast = useToast()
+  const navigate = useNavigate()
   const [name, setName] = useState('')
   const [sizeId, setSizeId] = useState(sizes[0]?.id ?? 'small')
   const [cores, setCores] = useState(2)
   const [memoryGb, setMemoryGb] = useState(4)
   const [diskGb, setDiskGb] = useState(40)
+  // New instances clone the current (newest ready) base image build.
+  const base = baseImage?.current ?? null
+  // Roles can arrive after the modal opens; until the user edits, follow the
+  // catalog defaults.
+  const [edited, setSelection] = useState<RoleSelection[] | null>(null)
+  const selection = edited ?? defaultSelection(roles)
   const [busy, setBusy] = useState(false)
 
-  const baseReady = dashboard?.base_image_built ?? true
+  // A build may have finished since the store last looked.
+  useEffect(() => {
+    refreshBaseImage()
+  }, [refreshBaseImage])
+
   const nameValid = /^[a-z][a-z0-9-]{1,30}$/.test(name)
   const isCustom = sizeId === CUSTOM
 
@@ -29,17 +44,18 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
     Number.isFinite(v) && v >= LIMITS[k].min && v <= LIMITS[k].max
   const customValid =
     inRange(cores, 'cores') && inRange(memoryGb, 'memory_gb') && inRange(diskGb, 'disk_gb')
-  const canSubmit = nameValid && (!isCustom || customValid)
+  const canSubmit =
+    nameValid && (!isCustom || customValid) && base !== null && selectionValid(selection)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!canSubmit) return
     setBusy(true)
     try {
-      const body = isCustom
-        ? { name, size_id: CUSTOM, cores, memory_gb: memoryGb, disk_gb: diskGb }
-        : { name, size_id: sizeId }
-      const { job_id } = await api.deploy(body)
+      const size = isCustom
+        ? { size_id: CUSTOM, cores, memory_gb: memoryGb, disk_gb: diskGb }
+        : { size_id: sizeId }
+      const { job_id } = await api.deploy({ name, ...size, base_image_id: base?.id, roles: selection })
       toast.success(`Deploying ${name}…`)
       openJob(job_id)
       refresh()
@@ -51,12 +67,10 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const baseImage = images.find((i) => i.id === 'homecloud-base')
-
   return (
     <>
       <div className="modal-scrim" onClick={onClose} />
-      <div className="modal" role="dialog" aria-label="Create instance">
+      <div className="modal modal-wide" role="dialog" aria-label="Create instance">
         <header className="modal-head">
           <h2>Create instance</h2>
           <button className="btn-icon" onClick={onClose} title="Close">
@@ -66,9 +80,19 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
 
         <form className="modal-form" onSubmit={submit}>
           <div className="modal-body">
-          {!baseReady && (
+          {baseImage && !base && (
             <div className="callout callout-warn">
-              The base image is not built yet. Build it from the Images tab first.
+              <div>No base image is built yet. Build one before creating instances.</div>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  onClose()
+                  navigate('/base-image')
+                }}
+              >
+                Go to Base image
+              </button>
             </div>
           )}
 
@@ -144,11 +168,24 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {baseImage && (
-            <div className="form-note">
-              Image: <code>{baseImage.name}</code> — {baseImage.description}
+          {base && (
+            <div className="form-field">
+              <span>Base image</span>
+              <small className="hint">
+                Clones base image <strong>{baseVersion(base.id)}</strong> (template #
+                {base.template_vmid}, built {relativeTime(base.built_at)}).
+              </small>
             </div>
           )}
+
+          <div className="form-field">
+            <span>Configure</span>
+            <small className="hint">
+              Roles applied by cloud-init on first boot. You can change them later from the
+              instance.
+            </small>
+            <RoleEditor catalog={roles} value={selection} onChange={setSelection} />
+          </div>
           </div>
 
           <footer className="modal-foot">

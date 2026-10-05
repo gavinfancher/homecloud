@@ -1,22 +1,41 @@
+"""Deploy, reconfigure and tear down instances — Proxmox and Tailscale APIs only.
+
+Deploy clones the current base image and hands the clone everything it needs
+on a NoCloud seed ISO: hostname, SSH keys, the rendered role script and a
+single-use Tailscale auth key. cloud-init runs the script on first boot; the
+controller only watches through the QEMU guest agent, then deletes the seed
+and records the tailnet device. Reconfigure writes a fresh script through the
+guest agent and runs it. Nothing here opens an SSH connection.
+"""
+
 from __future__ import annotations
 
 import logging
-import re
+import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+
+import yaml
 
 from homecloud.access import ssh_config_block
 from homecloud.config import settings
 from homecloud.dns.names import connection_info
 from homecloud.dns.zone import write_zone
-from homecloud.images.cloud_init import render_cloud_init
-from homecloud.images.registry import get_image
+from homecloud.images.base import current_build, emit_cloud_init_errors, get_build
 from homecloud.jobs import JobCancelled
+from homecloud.provision.catalog import resolve_roles
+from homecloud.provision.script import (
+    AUTHKEY_PATH,
+    LOG_PATH,
+    SCRIPT_PATH,
+    render_script,
+    run_command,
+)
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.state import (
-    get_built_template,
+    get_instance,
     get_ssh_public_keys,
-    hydrate_registry,
     register_vm,
     unregister_vm,
 )
@@ -25,30 +44,44 @@ from homecloud.tailscale.client import TailscaleClient
 logger = logging.getLogger(__name__)
 LogFn = Callable[[str, str], None]
 
+# Picking a free vmid and creating the clone must not interleave between two
+# deploys in this process, or both would pick the same id.
+_vmid_lock = threading.Lock()
+
+# First boot runs apt, Docker's installer and the like; give it room.
+PROVISION_TIMEOUT = 3600
+
 
 def _noop_log(_level: str, _message: str) -> None:
     pass
 
 
-def _custom_image_template(image_id: str) -> int | None:
-    """Template id of a DB-defined custom image, or None if it has no build."""
-    from homecloud.db.session import db_enabled  # noqa: PLC0415
-    from homecloud.images.store import get_custom_image  # noqa: PLC0415
-
-    if not db_enabled():
-        raise ValueError(f"Unknown image: {image_id}")
-    image = get_custom_image(image_id)
-    if image is None:
-        raise ValueError(f"Unknown image: {image_id}")
-    return image["template_id"] if image["built"] else None
+def instance_user_data(
+    *, hostname: str, ssh_keys: list[str], script: str, auth_key: str
+) -> str:
+    """The #cloud-config for an instance's first boot."""
+    doc = {
+        "hostname": hostname,
+        "ssh_authorized_keys": list(ssh_keys),
+        "write_files": [
+            {"path": SCRIPT_PATH, "permissions": "0700", "content": script},
+            {"path": AUTHKEY_PATH, "permissions": "0600", "content": auth_key},
+        ],
+        "runcmd": [run_command()],
+    }
+    return "#cloud-config\n" + yaml.safe_dump(doc, sort_keys=False, width=4096)
 
 
 class VMDeployer:
-    """Deploy VMs: join Tailscale, expose the split-DNS hostname and LAN address."""
+    """Deploy and reconfigure instances."""
 
-    def __init__(self, proxmox: ProxmoxClient | None = None) -> None:
+    def __init__(
+        self,
+        proxmox: ProxmoxClient | None = None,
+        tailscale: TailscaleClient | None = None,
+    ) -> None:
         self.proxmox = proxmox or ProxmoxClient()
-        self.tailscale = TailscaleClient()
+        self.tailscale = tailscale or TailscaleClient()
 
     def deploy(
         self,
@@ -57,8 +90,9 @@ class VMDeployer:
         cores: int,
         memory_gb: float,
         disk_gb: int,
+        roles: list[dict],
         size_id: str = "custom",
-        image_id: str = "homecloud-base",
+        base_image_id: int | None = None,
         log: LogFn | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> dict:
@@ -68,159 +102,205 @@ class VMDeployer:
             if cancel_check and cancel_check():
                 raise JobCancelled("Deployment cancelled by user")
 
-        hydrate_registry()
-
-        check_cancel()
         emit("info", "Validating configuration…")
-        if not settings.tailscale_auth_key:
-            raise ValueError("TAILSCALE_AUTH_KEY required — VMs must join your tailnet")
         if not settings.tailscale_api_key:
-            raise ValueError("TAILSCALE_API_KEY required — to resolve Tailscale IPs")
-
-        spec = get_image(image_id)
-        if spec is not None:
-            template_id = spec.template_id or get_built_template(image_id)
-        else:
-            # Not a built-in — look for a custom image definition in the DB.
-            template_id = _custom_image_template(image_id)
-        if template_id is None:
-            raise ValueError(
-                f"Image '{image_id}' is not built yet — build it before deploying instances"
-            )
-
+            raise ValueError("TAILSCALE_API_KEY required — it mints each VM's tailnet key")
+        if get_instance(name) is not None:
+            raise ValueError(f"An instance named {name!r} already exists")
+        roles = resolve_roles(roles)
+        base = get_build(base_image_id) if base_image_id else current_build()
+        if base is None or base["status"] != "ready":
+            raise ValueError("No ready base image — build one from the Base image page first")
         ssh_keys = get_ssh_public_keys()
         if not ssh_keys:
-            raise ValueError("No SSH public key — complete setup first")
-
-        check_cancel()
-        vmid = self.proxmox.next_vmid()
-        emit("info", f"Allocated VM ID {vmid} for {name}")
-
-        emit("info", f"Cloning template {template_id}…")
-        task = self.proxmox.clone_template(template_id, vmid, name)
-        self.proxmox.wait_for_task(task)
-        emit("info", "Clone complete")
+            raise ValueError("No SSH public key — add one in Settings first")
         check_cancel()
 
-        emit("info", "Configuring cloud-init (Tailscale join + SSH keys)…")
-        deploy_cloud_init = render_cloud_init(
-            "deploy.yaml.j2",
-            hostname=name,
-            tailscale_auth_key=settings.tailscale_auth_key,
-            ssh_public_keys=ssh_keys,
-        )
-        self.proxmox.set_cloudinit(
-            vmid,
-            user_data=deploy_cloud_init,
-            ciuser=settings.vm_ssh_user,
-            ipconfig0="ip=dhcp",
-            sshkeys=ssh_keys,
-        )
+        pve = self.proxmox
+        with _vmid_lock:
+            vmid = pve.next_vmid()
+            emit(
+                "info",
+                f"Cloning base image v{base['id']} (#{base['template_vmid']}) to VM {vmid}",
+            )
+            clone_task = pve.clone_template(base["template_vmid"], vmid, name)
+        started: datetime | None = None
+        try:
+            pve.wait_for_task(clone_task)
+            check_cancel()
 
-        memory_mb = int(memory_gb * 1024)
-        emit(
-            "info",
-            f"Setting resources: {cores} vCPU, {memory_gb} GB RAM, {disk_gb} GB disk",
-        )
-        self.proxmox.set_resources(vmid, cores=cores, memory_mb=memory_mb)
-        self._resize_disk_to_target(vmid, disk_gb)
-        self.proxmox.regenerate_cloudinit(vmid)
+            # A MAC no other VM has → its own DHCP lease → its own IP. The
+            # seed's network config is rendered from this MAC, so it goes first.
+            mac = pve.assign_unique_mac(vmid)
+            emit("info", f"Assigned MAC {mac}")
 
-        emit("info", "Starting VM…")
-        start_task = self.proxmox.start(vmid)
-        self.proxmox.wait_for_task(start_task, timeout=120)
-        emit("info", f"VM {vmid} is running — waiting for Tailscale join")
+            memory_mb = int(memory_gb * 1024)
+            emit("info", f"Setting resources: {cores} vCPU, {memory_gb} GB RAM, {disk_gb} GB disk")
+            pve.set_resources(vmid, cores=cores, memory_mb=memory_mb)
+            pve.grow_disk(vmid, "scsi0", disk_gb)
 
-        tailscale_ip = self._wait_for_tailscale_ip(name, log=emit, cancel_check=cancel_check)
-        emit("info", f"Tailscale IP assigned: {tailscale_ip}")
+            script = render_script(roles, user=settings.vm_ssh_user, hostname=name)
+            auth_key = self.tailscale.create_vm_auth_key(name)
+            pve.attach_seed(
+                vmid,
+                hostname=name,
+                user_data=instance_user_data(
+                    hostname=name, ssh_keys=ssh_keys, script=script, auth_key=auth_key
+                ),
+            )
 
-        local_ip = self.proxmox.get_lan_ip(vmid, use_cache=False) or ""
-        if local_ip:
-            emit("info", f"Local IP: {local_ip}")
-        else:
-            emit("warning", "Could not read the LAN address from the guest agent")
+            # Margin for clock skew between this host and Tailscale's servers.
+            started = datetime.now(UTC) - timedelta(minutes=2)
+            emit("info", "Starting VM…")
+            pve.wait_for_task(pve.start(vmid), timeout=120)
 
-        dns = connection_info(name, tailscale_ip, local_ip)
-        emit("info", f"Hostname: {dns['hostname']}")
-        ssh_block = ssh_config_block(host_alias=name, hostname=name)
+            local_ip = pve.wait_for_vm_ip(vmid, timeout=600, check_cancel=check_cancel)
+            role_ids = ", ".join(r["id"] for r in roles)
+            emit("info", f"Booted on {local_ip} — running roles: {role_ids}")
+            result = pve.guest_run(
+                vmid,
+                ["cloud-init", "status", "--wait"],
+                timeout=PROVISION_TIMEOUT,
+                check_cancel=check_cancel,
+            )
+            self._emit_provision_log(vmid, emit, failed=result["exitcode"] not in (0, 2))
+            if result["exitcode"] not in (0, 2):  # 2 = finished with warnings
+                emit_cloud_init_errors(pve, vmid, emit)
+                raise RuntimeError(
+                    f"First-boot provisioning failed (cloud-init exit {result['exitcode']})"
+                )
+            # The seed held the auth key; it has been spent, and now goes too.
+            pve.detach_seed(vmid)
 
+            device = self._wait_for_device(name, since=started, log=emit, check_cancel=check_cancel)
+        except BaseException:
+            emit("warning", f"Deploy failed — removing VM {vmid}")
+            self._discard(vmid, name, joined_since=started)
+            raise
+
+        tailscale_ip = TailscaleClient.tailnet_ip(device) or ""
+        emit("info", f"Joined the tailnet as {tailscale_ip}")
         record = {
             "vmid": vmid,
             "name": name,
-            "ip": tailscale_ip,
-            "tailscale_ip": tailscale_ip,
-            "local_ip": local_ip,
-            "hostname": dns["hostname"],
+            "base_image_id": base["id"],
             "size_id": size_id,
             "cores": cores,
-            "memory_gb": memory_gb,
             "memory_mb": memory_mb,
             "disk_gb": disk_gb,
-            "image_id": image_id,
+            "local_ip": local_ip,
+            "tailscale_ip": tailscale_ip,
+            "tailscale_device_id": TailscaleClient.device_id(device),
+            "roles": roles,
         }
         register_vm(name, record)
-        try:
-            write_zone()
-        except Exception:
-            logger.warning("write_zone failed after VM create — non-fatal", exc_info=True)
+        write_zone()
         ProxmoxClient.invalidate_vm_list_cache()
-        emit("info", f"Deployment complete — SSH: {dns['ssh']}")
 
+        dns = connection_info(name, tailscale_ip, local_ip)
+        emit("info", f"Deployment complete — {dns['hostname']}")
         return {
-            "vmid": vmid,
-            "name": name,
-            "status": "running",
-            "size_id": size_id,
-            "cores": cores,
-            "memory_gb": memory_gb,
-            "memory_mb": memory_mb,
-            "disk_gb": disk_gb,
-            "image_id": image_id,
-            "tailscale_ip": tailscale_ip,
-            "local_ip": local_ip,
+            **record,
             "hostname": dns["hostname"],
+            "status": "running",
             "ssh_command": dns["ssh"],
-            "ssh_config": ssh_block,
+            "ssh_config": ssh_config_block(host_alias=name, hostname=name),
         }
 
-    def _resize_disk_to_target(self, vmid: int, target_gb: int) -> None:
-        config = self.proxmox.get_vm_config(vmid)
-        scsi0 = config.get("scsi0", "")
-        match = re.search(r"size=(\d+)G", scsi0)
-        current_gb = int(match.group(1)) if match else 10
-        if target_gb > current_gb:
-            self.proxmox.resize_disk(vmid, "scsi0", target_gb - current_gb)
+    def provision(
+        self,
+        name: str,
+        roles: list[dict],
+        *,
+        log: LogFn | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict:
+        """Re-apply *roles* to a running instance through the guest agent."""
+        emit = log or _noop_log
 
-    def _wait_for_tailscale_ip(
+        def check_cancel() -> None:
+            if cancel_check and cancel_check():
+                raise JobCancelled("Reconfigure cancelled by user")
+
+        instance = get_instance(name)
+        if instance is None:
+            raise ValueError(f"Unknown instance: {name}")
+        roles = resolve_roles(roles)
+        vmid = instance["vmid"]
+        pve = self.proxmox
+
+        pve.wait_for_guest_agent(vmid, timeout=60, check_cancel=check_cancel)
+        pve.guest_write_file(
+            vmid, SCRIPT_PATH, render_script(roles, user=settings.vm_ssh_user, hostname=name)
+        )
+        emit("info", f"Running roles on {name}: {', '.join(r['id'] for r in roles)}")
+        result = pve.guest_run(
+            vmid, run_command(), timeout=PROVISION_TIMEOUT, check_cancel=check_cancel
+        )
+        self._emit_provision_log(vmid, emit, failed=result["exitcode"] != 0)
+        if result["exitcode"] != 0:
+            raise RuntimeError(f"Reconfigure failed (exit {result['exitcode']})")
+
+        # Only the fields this run changed — the rest may have moved meanwhile.
+        fields: dict = {"roles": roles}
+        local_ip = pve.get_lan_ip(vmid, use_cache=False)
+        if local_ip:
+            fields["local_ip"] = local_ip
+        register_vm(name, fields)
+        emit("info", f"{name} reconfigured")
+        return {"name": name, "roles": roles}
+
+    def _emit_provision_log(self, vmid: int, emit: LogFn, *, failed: bool) -> None:
+        """Copy the tail of the guest's provision log into the job log."""
+        try:
+            tail = self.proxmox.guest_run(vmid, ["tail", "-n", "40" if failed else "8", LOG_PATH])
+        except Exception:  # noqa: BLE001 — the log is a courtesy
+            logger.debug("Could not read provision log on VM %s", vmid, exc_info=True)
+            return
+        for line in tail["out"].splitlines():
+            if line.strip():
+                emit("error" if failed else "info", f"  {line}")
+
+    def _wait_for_device(
         self,
         hostname: str,
         *,
+        since: datetime,
         timeout: int = 180,
-        log: LogFn | None = None,
-        cancel_check: Callable[[], bool] | None = None,
-    ) -> str:
-        emit = log or _noop_log
+        log: LogFn,
+        check_cancel: Callable[[], None],
+    ) -> dict:
         deadline = time.time() + timeout
         last_log = 0.0
         while time.time() < deadline:
-            if cancel_check and cancel_check():
-                raise JobCancelled("Deployment cancelled by user")
-            ip = self.tailscale.get_device_ip(hostname)
-            if ip:
-                return ip
+            check_cancel()
+            device = self.tailscale.find_new_device(hostname, since=since)
+            if device and TailscaleClient.tailnet_ip(device):
+                return device
             if time.time() - last_log >= 15:
-                remaining = int(deadline - time.time())
-                emit("info", f"Still waiting for {hostname} on tailnet… ({remaining}s left)")
+                log("info", f"Waiting for {hostname} to appear on the tailnet…")
                 last_log = time.time()
             time.sleep(5)
-        raise TimeoutError(
-            f"VM {hostname} did not join tailnet within {timeout}s — "
-            f"check VM {hostname} is running and Tailscale API is reachable"
-        )
+        raise TimeoutError(f"{hostname} did not join the tailnet within {timeout}s")
+
+    def _discard(self, vmid: int, name: str, *, joined_since: datetime | None) -> None:
+        """Best-effort removal of a half-deployed VM and its tailnet device.
+
+        Only a device that joined after this deploy booted the VM is removed;
+        anything older with the same name belongs to someone else.
+        """
+        if joined_since is not None:
+            try:
+                device = self.tailscale.find_new_device(name, since=joined_since)
+                if device:
+                    self.tailscale.delete_device(TailscaleClient.device_id(device))
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not check the tailnet for %s", name, exc_info=True)
+        VMManager(self.proxmox, self.tailscale).remove_vm(vmid)
 
 
 class VMManager:
-    """Start, stop, and delete VMs."""
+    """Power actions and teardown for registered instances."""
 
     def __init__(
         self,
@@ -231,61 +311,79 @@ class VMManager:
         self.tailscale = tailscale or TailscaleClient()
 
     def start(self, vmid: int) -> dict:
-        task = self.proxmox.start(vmid)
-        self.proxmox.wait_for_task(task, timeout=120)
+        self.proxmox.wait_for_task(self.proxmox.start(vmid), timeout=120)
         ProxmoxClient.invalidate_vm_list_cache()
         # A restarted VM can come back on a different DHCP lease.
         ProxmoxClient.invalidate_lan_ip_cache(vmid)
         return {"vmid": vmid, "status": "running"}
 
     def stop(self, vmid: int) -> dict:
-        task = self.proxmox.stop(vmid)
-        self.proxmox.wait_for_task(task, timeout=120)
+        self.proxmox.wait_for_task(self.proxmox.stop(vmid), timeout=120)
         ProxmoxClient.invalidate_vm_list_cache()
         return {"vmid": vmid, "status": "stopped"}
 
     def suspend(self, vmid: int) -> dict:
-        task = self.proxmox.suspend(vmid)
-        self.proxmox.wait_for_task(task, timeout=120)
+        self.proxmox.wait_for_task(self.proxmox.suspend(vmid), timeout=120)
         ProxmoxClient.invalidate_vm_list_cache()
         return {"vmid": vmid, "status": "paused"}
 
     def resume(self, vmid: int) -> dict:
-        task = self.proxmox.resume(vmid)
-        self.proxmox.wait_for_task(task, timeout=120)
+        self.proxmox.wait_for_task(self.proxmox.resume(vmid), timeout=120)
         ProxmoxClient.invalidate_vm_list_cache()
-        # A restarted VM can come back on a different DHCP lease.
         ProxmoxClient.invalidate_lan_ip_cache(vmid)
         return {"vmid": vmid, "status": "running"}
 
-    def delete(self, vmid: int, *, name: str | None = None, log: LogFn | None = None) -> dict:
+    def delete(self, name: str, *, log: LogFn | None = None) -> dict:
+        """Tear down instance *name*: tailnet device, DNS, VM, then the record.
+
+        Every step tolerates the thing already being gone, so a failed
+        teardown can simply be run again.
+        """
         log = log or _noop_log
+        instance = get_instance(name)
+        if instance is None:
+            raise ValueError(f"Unknown instance: {name}")
+        vmid = instance["vmid"]
+
         tailscale_removed = False
-        if name:
-            unregister_vm(name)
-            try:
-                write_zone()
-            except Exception:
-                logger.warning("write_zone failed after VM delete — non-fatal", exc_info=True)
         try:
-            stop_task = self.proxmox.stop(vmid)
-            self.proxmox.wait_for_task(stop_task, timeout=120)
-        except Exception:
-            pass
-        if name and settings.tailscale_api_key:
+            device_id = instance.get("tailscale_device_id")
+            if device_id:
+                self.tailscale.delete_device(device_id)
+                tailscale_removed = True
+            else:  # instances from before device ids were recorded
+                tailscale_removed = self.tailscale.delete_device_by_hostname(name)
+        except Exception as exc:  # noqa: BLE001 — a stale device must not block teardown
+            logger.warning("Tailscale device delete failed for %s", name, exc_info=True)
+            log("warning", f"Could not remove {name} from the tailnet: {exc}")
+        else:
+            log("info", "Removed from the tailnet" if tailscale_removed else "No tailnet device")
+
+        self.remove_vm(vmid)
+        log("info", f"Deleted VM {vmid}")
+        unregister_vm(name)
+        write_zone()
+        return {
+            "vmid": vmid,
+            "name": name,
+            "status": "deleted",
+            "tailscale_removed": tailscale_removed,
+        }
+
+    def remove_vm(self, vmid: int) -> None:
+        pve = self.proxmox
+        if pve.get_vm(vmid) is not None:
             try:
-                if self.tailscale.delete_device_by_hostname(name):
-                    tailscale_removed = True
-                    log("info", f"Removed {name} from Tailnet")
-                else:
-                    log("info", f"No Tailscale device for {name} — tailnet cleanup skipped")
-            except Exception as exc:
-                logger.warning("Tailscale device delete failed for %s", name, exc_info=True)
-                log("warning", f"Could not remove {name} from Tailnet: {exc}")
-        task = self.proxmox.delete_vm(vmid)
-        if task:
-            self.proxmox.wait_for_task(task, timeout=120)
+                pve.wait_for_task(pve.stop(vmid), timeout=120)
+            except Exception:  # noqa: BLE001 — already stopped
+                logger.debug("Stop of VM %s failed", vmid, exc_info=True)
+            task = pve.delete_vm(vmid)
+            if task:
+                pve.wait_for_task(task, timeout=300)
+        try:
+            pve.delete_seed(vmid)
+        except Exception:  # noqa: BLE001
+            logger.warning("Leftover seed ISO for VM %s", vmid, exc_info=True)
         ProxmoxClient.invalidate_vm_list_cache()
         # next_vmid reuses ids — a stale entry would label the next VM wrongly.
         ProxmoxClient.invalidate_lan_ip_cache(vmid)
-        return {"vmid": vmid, "status": "deleted", "tailscale_removed": tailscale_removed}

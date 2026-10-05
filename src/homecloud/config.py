@@ -14,22 +14,17 @@ class Settings(BaseSettings):
     proxmox_node: str = "pve-root"
     proxmox_storage: str = "local-lvm"
     proxmox_bridge: str = "vmbr0"
-    proxmox_snippets_dir: str = "/var/lib/vz/snippets"
-    proxmox_ssh_host: str = ""
-    proxmox_base_template_id: int = 9000
+    # Directory storage that holds cloud-init seed ISOs (content "iso") and
+    # downloaded distro cloud images (content "import").
+    proxmox_image_storage: str = "local"
 
-    # Database (image catalog + custom image definitions).
-    # Empty → the DB-backed image store is disabled and only the built-in
-    # registry is served, so local runs/tests work without Postgres.
+    # Database (source image catalog).
+    # Empty → sources are unavailable, so nothing can be deployed.
     database_url: str = ""
 
-    # Where downloaded distro cloud images are cached on the Proxmox node.
-    cloud_image_cache_dir: str = "/var/lib/vz/template/iso"
-
-    # Tailscale — VMs join tailnet; SSH via MagicDNS (name.tailnet.ts.net)
+    # Tailscale — the API key lists/deletes devices and mints per-VM auth keys
     tailscale_api_key: str = ""
     tailscale_tailnet: str = ""
-    tailscale_auth_key: str = ""
 
     # VM SSH user
     vm_ssh_user: str = "ubuntu"

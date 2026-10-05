@@ -16,20 +16,13 @@ _engine: Engine | None = None
 _Session: sessionmaker[Session] | None = None
 
 
-def db_enabled() -> bool:
-    """True when a DATABASE_URL is configured.
-
-    With no URL the controller still serves the built-in image registry, so
-    local dev and the test suite run without Postgres.
-    """
-    return bool(settings.database_url)
-
-
 def get_engine() -> Engine:
     global _engine, _Session
     if _engine is None:
         if not settings.database_url:
-            raise RuntimeError("DATABASE_URL is not set — the image database is unavailable")
+            raise RuntimeError(
+                "DATABASE_URL is not set — the controller keeps all state in Postgres"
+            )
         _engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
         _Session = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
@@ -52,16 +45,8 @@ def session_scope() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create tables and seed the built-in cloud image catalog.
+    """Apply pending migrations. Safe on every startup: applied ones are skipped."""
+    from homecloud.db.migrate import migrate
 
-    Safe to call on every startup: ``create_all`` is a no-op for existing
-    tables and seeding skips catalog rows that are already present.
-    """
-    from homecloud.db.models import Base
-    from homecloud.images.catalog import seed_catalog
-
-    engine = get_engine()
-    Base.metadata.create_all(engine)
-    with session_scope() as session:
-        seed_catalog(session)
-    logger.info("Image database ready")
+    migrate(get_engine())
+    logger.info("Database ready")

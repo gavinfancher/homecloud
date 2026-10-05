@@ -1,0 +1,9 @@
+label: Packages
+description: Extra apt packages on top of the ones baked into the base image.
+order: 10
+default_enabled: false
+vars:
+  - name: packages
+    label: Packages
+    type: list
+    default: []
