@@ -49,7 +49,7 @@ compose() {
 
 healthy() {
   for _ in $(seq 45); do
-    curl -fsS -o /dev/null http://127.0.0.1:8080/api/health && return 0
+    curl -fs -o /dev/null http://127.0.0.1:8080/api/health && return 0
     sleep 2
   done
   return 1
