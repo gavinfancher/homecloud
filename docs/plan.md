@@ -58,7 +58,7 @@ Jobs: the API inserts a row, and a runner thread in the same process claims work
 
 Prod prerequisites before the first build:
 - **Proxmox storage `local` needs the `import` content type.** Today it has `backup,iso,snippets,vztmpl`, so `download-url` refuses to fetch the cloud image. Fix: `pvesm set local --content backup,iso,snippets,vztmpl,import`, or Datacenter → Storage → local → Content.
-- `TAILSCALE_API_KEY` mints the per-VM keys (an OAuth client can replace it later). `TAILSCALE_TAGS` is optional; set it only once the tailnet policy has `tagOwners` for the tag.
+- `TAILSCALE_API_KEY` is the one Tailscale credential: it mints the per-VM keys (untagged, so VMs are owned by you) and lists and deletes devices. Tailscale API keys expire after at most 90 days, so put a rotation reminder on the calendar.
 - The console changes ship with the frontend build. The old console calls `/api/sources`, which no longer exists, so deploy the backend and frontend together.
 
 **Base image** (one definition, editable from the console and the API):
@@ -68,7 +68,7 @@ Prod prerequisites before the first build:
 
 **Deploy**:
 1. Clone the template, set resources, resize the disk.
-2. Mint a **per-VM, single-use, pre-authorized, tagged** Tailscale auth key through the Tailscale API. This replaces the long-lived `TAILSCALE_AUTH_KEY`. As built: minted with `TAILSCALE_API_KEY`, single-use, with a 1h expiry, tagged when `TAILSCALE_TAGS` is set.
+2. Mint a **per-VM, single-use, pre-authorized** Tailscale auth key through the Tailscale API. This replaces the long-lived `TAILSCALE_AUTH_KEY`. As built: minted with `TAILSCALE_API_KEY`, single-use, with a 1h expiry, untagged.
 3. Render the instance user-data: hostname, extra keys, `tailscale up --authkey … --hostname <name>`, and role fragments.
 4. Upload it as the seed ISO and start the VM.
 5. Wait on the guest agent for `cloud-init status --wait`, then detach and delete the seed ISO, which contains the auth key.

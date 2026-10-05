@@ -111,10 +111,9 @@ class TailscaleClient:
         It reaches the VM on the cloud-init seed, so it is short-lived and
         spent on first use; the seed itself is deleted once cloud-init is done.
         """
-        create: dict = {"reusable": False, "ephemeral": False, "preauthorized": True}
-        tags = [t.strip() for t in settings.tailscale_tags.split(",") if t.strip()]
-        if tags:
-            create["tags"] = tags
+        # Untagged: the VM is owned by the API key's user, like a device you
+        # added yourself.
+        create = {"reusable": False, "ephemeral": False, "preauthorized": True}
         payload = {
             "capabilities": {"devices": {"create": create}},
             "expirySeconds": expiry_seconds,
