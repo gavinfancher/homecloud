@@ -108,26 +108,6 @@ export const IconScan = (p: IconProps) => (
   </svg>
 )
 
-export const IconGlobe = (p: IconProps) => (
-  <svg {...base} {...p}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18" />
-  </svg>
-)
-
-export const IconLock = (p: IconProps) => (
-  <svg {...base} {...p}>
-    <rect x="4" y="11" width="16" height="9" rx="2" />
-    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-  </svg>
-)
-
-export const IconExternal = (p: IconProps) => (
-  <svg {...base} {...p}>
-    <path d="M14 4h6v6M20 4l-9 9M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />
-  </svg>
-)
-
 export const IconChevron = (p: IconProps) => (
   <svg {...base} {...p}>
     <path d="M9 6l6 6-6 6" />

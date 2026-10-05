@@ -5,16 +5,13 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 export type TokenGetter = () => Promise<string | null>
 
-export interface WebService {
-  service: string
-  port: number
-  public_host: string
-  public: boolean
-}
-
 export interface SeenPort {
   port: number
   proc?: string
+  address?: string
+  /** False when the port only listens on loopback, so it isn't reachable over the tailnet. */
+  publishable?: boolean
+  not_publishable_reason?: string
 }
 
 export interface VM {
@@ -35,7 +32,6 @@ export interface VM {
   base_image_id?: number | null
   tailscale_device_id?: string | null
   roles?: RoleSelection[]
-  web?: WebService[]
   ports_seen?: SeenPort[]
   ports_scanned_at?: string | null
 }
@@ -230,7 +226,7 @@ export function createApi(getToken: TokenGetter) {
       }
       if (e instanceof TypeError) {
         throw new Error(
-          `Network error calling ${API_BASE || 'same-origin'}${path} — API unreachable (check homecloud-api.gavinf.com / tunnel)`,
+          `Network error calling ${API_BASE || 'same-origin'}${path} — API unreachable (check api.gavinf.com/homecloud / tunnel)`,
           { cause: e },
         )
       }
@@ -274,13 +270,6 @@ export function createApi(getToken: TokenGetter) {
         { method: 'POST', body: JSON.stringify({ ssh_public_keys: sshPublicKeys }) },
       ),
     sshConfig: () => req<{ config: string }>('/api/ssh-config'),
-    publish: (name: string, service: string, port: number, isPublic: boolean, force = false) =>
-      req(`/api/vms/${name}/services`, {
-        method: 'POST',
-        body: JSON.stringify({ service, port, public: isPublic, force }),
-      }),
-    unpublish: (name: string, service: string) =>
-      req(`/api/vms/${name}/services/${service}`, { method: 'DELETE' }),
   }
 }
 

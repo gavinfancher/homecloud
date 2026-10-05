@@ -1,20 +1,13 @@
 import { useState } from 'react'
 import type { VM } from '../api'
 import { CreateInstanceModal } from '../components/CreateInstanceModal'
-import {
-  IconChevron,
-  IconGlobe,
-  IconInstances,
-  IconPlus,
-  IconScan,
-} from '../components/Icons'
+import { IconChevron, IconInstances, IconPlus, IconScan } from '../components/Icons'
 import { InstanceActions } from '../components/InstanceActions'
 import { ReconfigureModal } from '../components/ReconfigureModal'
 import { useToast } from '../components/Toast'
 import { CopyButton, EmptyState, Field, Mono, Pill } from '../components/ui'
 import { baseVersion } from '../lib/format'
 import { useStore } from '../lib/store'
-import { InstanceServices } from './InstanceServices'
 
 export function Instances() {
   const { vms, refresh } = useStore()
@@ -115,8 +108,6 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
     }
   }
 
-  const webCount = vm.web?.length ?? 0
-
   return (
     <div className={`instance ${open ? 'open' : ''}`}>
       <div className="instance-summary" onClick={onToggle}>
@@ -131,11 +122,6 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
         <span className="instance-specs muted">
           {vm.cores ?? '?'} vCPU · {vm.memory_gb ?? '?'} GB · {vm.disk_gb ?? '?'} GB
         </span>
-        {webCount > 0 && (
-          <span className="badge" title={`${webCount} published service(s)`}>
-            <IconGlobe width={13} height={13} /> {webCount}
-          </span>
-        )}
         <div className="spacer" />
         <div className="instance-actions-wrap" onClick={(e) => e.stopPropagation()}>
           <InstanceActions vm={vm} />
@@ -191,7 +177,7 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
 
             <section className="detail-block">
               <div className="block-head">
-                <h4>Open ports</h4>
+                <h4>Ports</h4>
                 <button
                   className="btn btn-ghost btn-sm"
                   disabled={busy}
@@ -207,16 +193,37 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
               </div>
               {vm.ports_seen && vm.ports_seen.length > 0 ? (
                 <div className="port-chips">
-                  {vm.ports_seen.map((p) => (
-                    <span className="port-chip" key={p.port}>
-                      <strong>{p.port}</strong>
-                      {p.proc && <span className="muted">{p.proc}</span>}
-                    </span>
-                  ))}
+                  {vm.ports_seen.map((p) => {
+                    const local = p.publishable === false
+                    return (
+                      <span
+                        className={`port-chip ${local ? 'local' : ''}`}
+                        key={p.port}
+                        title={
+                          local
+                            ? p.not_publishable_reason ||
+                              `Listens on ${p.address ?? 'loopback'} only; not reachable over the tailnet`
+                            : p.address
+                              ? `Listening on ${p.address}`
+                              : undefined
+                        }
+                      >
+                        <strong>{p.port}</strong>
+                        {p.proc && <span className="muted">{p.proc}</span>}
+                        {local && <span className="port-note">loopback only</span>}
+                      </span>
+                    )
+                  })}
                 </div>
               ) : (
                 <p className="muted small">
                   No ports scanned yet. Run a scan to discover listening services.
+                </p>
+              )}
+              {vm.hostname && (
+                <p className="hint ports-hint">
+                  Reachable over the tailnet at <code>{vm.hostname}:&lt;port&gt;</code>;{' '}
+                  <code>*.{vm.hostname}</code> resolves here too.
                 </p>
               )}
             </section>
@@ -255,8 +262,6 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
               )}
             </section>
           </div>
-
-          <InstanceServices vm={vm} />
         </div>
       )}
 

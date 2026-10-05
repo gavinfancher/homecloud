@@ -1,11 +1,10 @@
 # Split DNS for instance names. Tailscale sends queries for these zones to the
 # control VM's tailnet IP; everything else resolves publicly as usual.
 #
-# The controller writes db.<zone> from the instances table (DOMAIN, plus any
+# The api writes /zones/db.<zone> from the instances table (DOMAIN, plus any
 # DNS_LEGACY_DOMAINS still being served) and the file plugin reloads it.
-# fallthrough + forward lets names outside the records resolve publicly.
 vm.dns.gavinf.com {
-    file /etc/coredns/db.vm.dns.gavinf.com vm.dns.gavinf.com {
+    file /zones/db.vm.dns.gavinf.com vm.dns.gavinf.com {
         reload 5s
         fallthrough
     }
@@ -17,7 +16,7 @@ vm.dns.gavinf.com {
 
 # Legacy zone — same records — until every client uses vm.dns.gavinf.com.
 vm.homecloud.gavinf.com {
-    file /etc/coredns/db.vm.homecloud.gavinf.com vm.homecloud.gavinf.com {
+    file /zones/db.vm.homecloud.gavinf.com vm.homecloud.gavinf.com {
         reload 5s
         fallthrough
     }

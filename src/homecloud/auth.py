@@ -1,8 +1,7 @@
-"""Clerk authentication for the controller API and the Caddy forward-auth gate.
+"""Clerk authentication for the controller API.
 
-Phase 09: verify Clerk-issued JWTs (RS256, JWKS) for every ``/api/*`` call.
-Phase 11: a ``/auth/verify`` endpoint that Caddy calls (``forward_auth``) to
-gate published instance web apps behind the same Clerk identity.
+Every ``/api/*`` call carries a Clerk-issued JWT (RS256, verified against the
+JWKS), as a bearer token or the ``__session`` cookie.
 
 Graceful degradation (repo convention): when ``CLERK_JWKS_URL`` /
 ``CLERK_ISSUER`` are unset the system is in **disabled / dev mode** — auth is a

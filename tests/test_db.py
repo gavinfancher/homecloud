@@ -61,7 +61,7 @@ def test_migrate_is_idempotent_and_upgrades_a_pre_runner_database(db):
             )
         )
         conn.execute(text("CREATE TABLE custom_images (id text)"))
-    assert migrate(db) == ["001_init", "002_base_images"]
+    assert migrate(db) == ["001_init", "002_base_images", "003_drop_published_services"]
     with db.connect() as conn:
         tables = set(
             conn.scalars(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
@@ -133,32 +133,11 @@ def test_instance_lifecycle(db):
     # Partial update: only the given fields change.
     state.register_vm("pixie", {"roles": [{"id": "docker", "vars": {}}]})
     state.set_instance_ports("pixie", [{"port": 22}])
-    state.set_instance_web_service(
-        "pixie",
-        service="app",
-        port=80,
-        public_host="app.pixie",
-        public=False,
-        cloudflare_record_id="",
-        caddy_config="app.pixie.caddy",
-    )
-    state.set_instance_web_service(
-        "pixie",
-        service="app",
-        port=8080,
-        public_host="app.pixie",
-        public=False,
-        cloudflare_record_id="",
-        caddy_config="app.pixie.caddy",
-    )
     vm = state.list_registered_vms()["pixie"]
     assert vm["local_ip"] == "10.0.0.55"
     assert vm["roles"] == [{"id": "docker", "vars": {}}]
     assert vm["ports_seen"] == [{"port": 22}] and vm["ports_scanned_at"]
-    assert [w["port"] for w in vm["web"]] == [8080]
 
-    state.remove_instance_web_service("pixie", "app")
-    assert state.get_instance("pixie")["web"] == []
     state.unregister_vm("pixie")
     assert state.get_instance("pixie") is None
 

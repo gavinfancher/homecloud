@@ -28,7 +28,6 @@ _INSTANCE_FIELDS = (
     "tailscale_ip",
     "tailscale_device_id",
     "roles",
-    "web",
     "ports_seen",
 )
 
@@ -128,47 +127,6 @@ def get_instance(name: str) -> dict | None:
     with session_scope() as session:
         row = session.get(Instance, name)
         return row.to_dict() if row else None
-
-
-def set_instance_web_service(
-    instance_name: str,
-    *,
-    service: str,
-    port: int,
-    public_host: str,
-    public: bool,
-    cloudflare_record_id: str,
-    caddy_config: str,
-) -> None:
-    """Upsert a web service entry in the instance's ``web`` list.
-
-    Replaces any existing entry with the same ``service`` name and appends a
-    new one otherwise.  No-op when the instance is not registered.
-    """
-    entry = {
-        "service": service,
-        "port": port,
-        "public_host": public_host,
-        "public": public,
-        "cloudflare_record_id": cloudflare_record_id,
-        "caddy_config": caddy_config,
-    }
-    with session_scope() as session:
-        row = session.get(Instance, instance_name, with_for_update=True)
-        if row is None:
-            return
-        row.web = [e for e in row.web if e.get("service") != service] + [entry]
-
-
-def remove_instance_web_service(instance_name: str, service: str) -> None:
-    """Remove the web service entry for *service* from *instance_name*.
-
-    No-op when the instance or service is not found.
-    """
-    with session_scope() as session:
-        row = session.get(Instance, instance_name, with_for_update=True)
-        if row is not None:
-            row.web = [e for e in row.web if e.get("service") != service]
 
 
 def set_instance_ports(instance_name: str, ports: list[dict]) -> None:
