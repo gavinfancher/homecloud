@@ -1,0 +1,93 @@
+# The homecloud control plane on one VM. Run it through deploy.sh, which wraps
+# `docker compose` in `infisical run` so every ${VAR} and pass-through name
+# below comes from Infisical (project homecloud, env prod). Nothing is read
+# from a .env file.
+name: homecloud
+
+services:
+  api:
+    image: ghcr.io/gavinfancher/homecloud:${HOMECLOUD_TAG:?set HOMECLOUD_TAG}
+    container_name: homecloud-api
+    restart: unless-stopped
+    # Loopback only: the tunnel reaches it over the compose network, and
+    # deploy.sh health-checks it from the host.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      COREDNS_ZONE_DIR: /zones
+      # Pass-through from Infisical:
+      DATABASE_URL:
+      PROXMOX_HOST:
+      PROXMOX_USER:
+      PROXMOX_TOKEN_NAME:
+      PROXMOX_TOKEN_VALUE:
+      PROXMOX_VERIFY_SSL:
+      PROXMOX_NODE:
+      PROXMOX_STORAGE:
+      PROXMOX_BRIDGE:
+      PROXMOX_IMAGE_STORAGE:
+      TAILSCALE_API_KEY:
+      TAILSCALE_TAILNET:
+      VM_SSH_USER:
+      DOMAIN:
+      DNS_LEGACY_DOMAINS:
+      CONTROL_NODE_TAILSCALE_IP:
+      OWNER_USERNAME:
+      CLERK_JWKS_URL:
+      CLERK_ISSUER:
+      CLERK_AUTHORIZED_PARTIES:
+      CLERK_PUBLISHABLE_KEY:
+      FRONTEND_ORIGIN:
+      CONSOLE_URL:
+    volumes:
+      # The api (uid 1000) writes db.<zone>; deploy.sh creates the dir owned by 1000.
+      - /opt/homecloud/zones:/zones
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18.4
+    container_name: homecloud-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      # postgres:18+ wants the mount one level above the data directory.
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Remote-managed tunnel: routes live in the Cloudflare dashboard
+  # (homecloud-api.gavinf.com → http://api:8080).
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    container_name: homecloud-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - api
+
+  # Split DNS for instance names; Tailscale sends the zones' queries here.
+  coredns:
+    image: coredns/coredns:1.12.4
+    container_name: homecloud-coredns
+    restart: unless-stopped
+    command: -conf /etc/coredns/Corefile
+    volumes:
+      - /opt/homecloud/Corefile:/etc/coredns/Corefile:ro
+      - /opt/homecloud/zones:/zones:ro
+    ports:
+      # Tailnet IP only — systemd-resolved owns 127.0.0.53:53.
+      - "${CONTROL_NODE_TAILSCALE_IP:?set CONTROL_NODE_TAILSCALE_IP}:53:53/udp"
+      - "${CONTROL_NODE_TAILSCALE_IP}:53:53/tcp"
+
+volumes:
+  postgres_data:

@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import APIRouter, HTTPException
 
 from homecloud.access import ssh_config_block
 from homecloud.api.schemas import (
     BaseImageConfigRequest,
     DeployVMRequest,
     ProvisionRequest,
-    PublishServiceRequest,
     SetupRequest,
 )
-from homecloud.auth import extract_token, get_clerk_auth
+from homecloud.auth import get_clerk_auth
 from homecloud.config import settings
 from homecloud.dns.names import connection_info, private_fqdn
 from homecloud.images import base
@@ -21,7 +19,6 @@ from homecloud.images.deployer import VMManager
 from homecloud.jobs import job_store
 from homecloud.provision.catalog import RoleError, list_roles, resolve_roles
 from homecloud.proxmox.client import ProxmoxClient
-from homecloud.publish import publish_web, unpublish_web
 from homecloud.sizes import list_sizes
 from homecloud.state import (
     get_instance,
@@ -37,8 +34,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["api"])
 # Unauthenticated endpoints (health + SPA bootstrap config).
 public_router = APIRouter(prefix="/api", tags=["public"])
-# Caddy forward-auth gate for published instance apps (no prefix).
-auth_router = APIRouter(tags=["auth"])
 
 
 def _local_ip(vm: dict, proxmox: ProxmoxClient | None) -> str:
@@ -118,34 +113,6 @@ def public_config() -> dict:
         "owner_username": settings.owner_username,
         "auth_enabled": get_clerk_auth().enabled,
     }
-
-
-@auth_router.get("/auth/verify")
-def auth_verify(request: Request):
-    """Forward-auth target for Caddy: 2xx allows, 302 redirects to login.
-
-    Gates published instance apps behind the same Clerk session. In disabled
-    (dev) mode it allows everything.
-    """
-    auth = get_clerk_auth()
-    if not auth.enabled:
-        return {"status": "auth-disabled"}
-    token = extract_token(request)
-    if token:
-        try:
-            claims = auth.verify_token(token)
-            return JSONResponse(
-                {"sub": claims.get("sub")},
-                headers={"X-Auth-Sub": claims.get("sub", "") or ""},
-            )
-        except Exception:  # noqa: BLE001 — fall through to the login redirect
-            pass
-    # Browser hitting a protected app with no/invalid session → send to console login.
-    if settings.console_url:
-        target = request.headers.get("X-Forwarded-Uri", "")
-        sep = "&" if "?" in settings.console_url else "?"
-        return RedirectResponse(f"{settings.console_url}{sep}redirect={target}", status_code=302)
-    raise HTTPException(401, "Unauthenticated")
 
 
 @router.get("/dashboard")
@@ -471,56 +438,3 @@ def get_ports(name: str) -> dict:
         "ports_seen": instance.get("ports_seen") or [],
         "ports_scanned_at": instance.get("ports_scanned_at"),
     }
-
-
-@router.post("/vms/{name}/services")
-def publish_service(name: str, body: PublishServiceRequest) -> dict:
-    """Publish *body.port* on instance *name* as a named web service.
-
-    Calls ``publish_web`` (Caddy site file + optional Cloudflare CNAME) and
-    persists the entry on the instance's ``web`` list.
-
-    The ``service`` field must match ``^[a-z][a-z0-9-]{1,30}$`` (validated by
-    the schema).  The ``port`` must appear in ``ports_seen`` unless
-    ``force=true`` is set.
-    """
-    instance = _require_instance(name)
-
-    # Port must have been seen in a recent scan (unless overridden).
-    if not body.force:
-        seen_ports = {p["port"] for p in instance.get("ports_seen") or []}
-        if body.port not in seen_ports:
-            raise HTTPException(
-                400,
-                f"Port {body.port} was not found in the last scan of '{name}'. "
-                "Run POST /api/vms/{name}/scan-ports first, or set force=true to bypass.",
-            )
-
-    upstream_host: str = instance.get("tailscale_ip") or ""
-    if not upstream_host:
-        raise HTTPException(
-            400,
-            f"Instance '{name}' has no tailscale_ip recorded; "
-            "ensure the VM has joined the tailnet before publishing.",
-        )
-
-    result = publish_web(
-        name,
-        body.service,
-        body.port,
-        upstream_host=upstream_host,
-        public=body.public,
-    )
-    return result
-
-
-@router.delete("/vms/{name}/services/{service}")
-def unpublish_service(name: str, service: str) -> dict:
-    """Unpublish *service* from instance *name*.
-
-    Removes the Caddy route, Cloudflare record (if present), and state entry.
-    No-op when the service was not published.
-    """
-    _require_instance(name)
-    unpublish_web(name, service)
-    return {"ok": True, "removed": service}

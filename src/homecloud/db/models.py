@@ -98,7 +98,6 @@ class Instance(Base):
     tailscale_ip: Mapped[str | None] = mapped_column(Text)
     tailscale_device_id: Mapped[str | None] = mapped_column(Text)
     roles: Mapped[list[Any]] = mapped_column(JSONB, default=list)
-    web: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     ports_seen: Mapped[list[Any] | None] = mapped_column(JSONB)
     ports_scanned_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
@@ -119,7 +118,6 @@ class Instance(Base):
             "memory_gb": round(self.memory_mb / 1024, 2) if self.memory_mb else None,
             "disk_gb": self.disk_gb,
             "roles": self.roles,
-            "web": self.web,
             "ports_seen": self.ports_seen,
             "ports_scanned_at": _iso(self.ports_scanned_at),
             "created_at": _iso(self.created_at),

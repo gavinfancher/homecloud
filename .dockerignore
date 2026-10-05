@@ -1,4 +1,4 @@
-# Only pyproject.toml, uv.lock and src/ are needed by infra/docker/Dockerfile.
+# Only pyproject.toml, uv.lock and src/ are needed by deploy/Dockerfile.
 .git
 .github
 .gitignore
@@ -18,6 +18,6 @@
 docs
 tests
 frontend
-infra
+deploy
 ssh
 scripts

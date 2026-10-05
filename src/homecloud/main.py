@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from homecloud.api.routes import auth_router, public_router, router
+from homecloud.api.routes import public_router, router
 from homecloud.auth import require_auth
 from homecloud.config import settings
 from homecloud.db import init_db
@@ -58,9 +58,8 @@ if _origins:
         allow_headers=["*"],
     )
 
-# Public (unauthenticated): health + SPA bootstrap config + forward-auth gate.
+# Public (unauthenticated): health + SPA bootstrap config.
 app.include_router(public_router)
-app.include_router(auth_router)
 # Everything under /api requires a valid Clerk token (no-op in dev — see auth.py).
 app.include_router(router, dependencies=[Depends(require_auth)])
 

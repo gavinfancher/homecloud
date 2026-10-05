@@ -1,4 +1,3 @@
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,15 +28,9 @@ class Settings(BaseSettings):
     # VM SSH user
     vm_ssh_user: str = "ubuntu"
 
-    # Controller (AGENT_HOST/AGENT_PORT still accepted for back-compat)
-    controller_host: str = Field(
-        default="0.0.0.0",
-        validation_alias=AliasChoices("CONTROLLER_HOST", "AGENT_HOST"),
-    )
-    controller_port: int = Field(
-        default=8080,
-        validation_alias=AliasChoices("CONTROLLER_PORT", "AGENT_PORT"),
-    )
+    # Controller listen address
+    controller_host: str = "0.0.0.0"
+    controller_port: int = 8080
 
     # Private zone for instance names: <vm>.<domain> and *.<vm>.<domain>,
     # served by CoreDNS to the tailnet through Tailscale split DNS.
@@ -46,27 +39,12 @@ class Settings(BaseSettings):
     # (comma-separated, e.g. "vm.homecloud.gavinf.com").
     dns_legacy_domains: str = ""
 
-    # Cloudflare
-    cloudflare_api_token: str = ""
-    cloudflare_zone_id: str = ""
-    cloudflare_tunnel_id: str = ""
-    cloudflare_tunnel_cname: str = ""
-
-    # Caddy
-    caddy_config_dir: str = "/etc/caddy/sites"
-    caddy_reload_cmd: str = ""
-
-    # Local resolver (split DNS)
     # CoreDNS reads db.<zone> from here and reloads it on change.
     coredns_zone_dir: str = "/etc/coredns"
     control_node_tailscale_ip: str = ""
 
-    # Default primary web port for an instance's base hostname
-    default_web_port: int = 80
-
-    # Owner (single-user model) — namespacing label used in public hostnames:
-    #   <service>.<instance>.<owner_username>.<domain>
-    # Leave empty to keep the flat <service>.<instance>.<domain> scheme.
+    # Owner (single-user model) — optional namespace in instance names:
+    #   <instance>.<owner_username>.<domain>. Empty → <instance>.<domain>.
     owner_username: str = ""
 
     # Clerk auth (phase 09). All optional: when jwks_url + issuer are unset,
@@ -77,14 +55,9 @@ class Settings(BaseSettings):
     clerk_authorized_parties: str = ""  # comma-separated allowed azp (e.g. https://homecloud.gavinf.com)
     clerk_publishable_key: str = ""   # public; surfaced to the SPA via GET /api/config
 
-    # Frontend / API exposure (phases 09–11)
-    frontend_origin: str = ""          # comma-separated CORS origins for the Pages SPA
-    api_public_host: str = ""          # e.g. homecloud-api.gavinf.com (tunnel route)
-    console_url: str = ""              # e.g. https://homecloud.gavinf.com — login redirect target
-
-    # Caddy forward-auth (phase 11). When set, every published site is gated by
-    # a forward_auth to this upstream's /auth/verify. Empty → no auth block.
-    caddy_forward_auth_upstream: str = ""  # e.g. controller:8080
+    # Console
+    frontend_origin: str = ""          # comma-separated CORS origins for the console SPA
+    console_url: str = ""              # e.g. https://homecloud.gavinf.com
 
 
 settings = Settings()

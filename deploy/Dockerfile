@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Build context is the repo root:
-#   docker build -f infra/docker/Dockerfile .
+#   docker build -f deploy/Dockerfile .
 
 ARG PYTHON_IMAGE=python:3.12-slim
 

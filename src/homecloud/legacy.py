@@ -55,7 +55,6 @@ def import_state(path: Path) -> dict:
                     local_ip=record.get("local_ip"),
                     tailscale_ip=record.get("tailscale_ip") or record.get("ip"),
                     roles=record.get("roles") or [],
-                    web=record.get("web") or [],
                     ports_seen=record.get("ports_seen"),
                 )
             )
