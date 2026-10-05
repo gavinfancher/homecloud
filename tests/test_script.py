@@ -29,7 +29,7 @@ def test_script_is_valid_bash():
 
 def test_roles_render_in_catalog_order():
     script = _render([{"id": "commands", "vars": {"commands": ["true"]}}, {"id": "docker"}])
-    order = [script.index(f"▸ {role}") for role in ("tailscale", "docker", "commands")]
+    order = [script.index(f"▸ {role}") for role in ("docker", "commands", "tailscale")]
     assert order == sorted(order)
 
 
