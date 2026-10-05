@@ -277,10 +277,8 @@ def build(
             vmid, ["cloud-init", "status", "--wait"], timeout=1800, check_cancel=check_cancel
         )
         if result["exitcode"] not in (0, 2):  # 2 = finished with warnings
-            raise RuntimeError(
-                f"cloud-init failed while baking (exit {result['exitcode']}): "
-                f"{(result['err'] or result['out']).strip()[-500:]}"
-            )
+            emit_cloud_init_errors(pve, vmid, emit)
+            raise RuntimeError(f"cloud-init failed while baking (exit {result['exitcode']})")
         emit("info", "Bake boot finished — preparing the template")
 
         pve.prepare_for_template(vmid)
@@ -298,6 +296,27 @@ def build(
     _finish_build(build_id, status="ready", template_vmid=vmid, built_at=datetime.now(UTC))
     emit("info", f"Base image v{build_id} ready — template #{vmid}")
     return vmid
+
+
+def emit_cloud_init_errors(pve: ProxmoxClient, vmid: int, emit: LogFn) -> None:
+    """Copy cloud-init's own account of a failure into the job log.
+
+    Runs before cleanup deletes the VM, which would take the evidence with it.
+    """
+    commands = [
+        ["cloud-init", "status", "--long"],
+        ["tail", "-n", "30", "/var/log/cloud-init-output.log"],
+        ["bash", "-c", "grep -E 'WARNING|ERROR|Traceback' /var/log/cloud-init.log | tail -n 20"],
+    ]
+    for command in commands:
+        try:
+            result = pve.guest_run(vmid, command, timeout=60)
+        except Exception:  # noqa: BLE001 — diagnostics are best-effort
+            logger.debug("Diagnostic %s failed on VM %s", command, vmid, exc_info=True)
+            continue
+        for line in (result["out"] + result["err"]).splitlines():
+            if line.strip():
+                emit("error", f"  {line}")
 
 
 def _cleanup_vm(pve: ProxmoxClient, vmid: int) -> None:

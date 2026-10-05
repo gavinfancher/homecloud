@@ -23,7 +23,7 @@ from homecloud.access import ssh_config_block
 from homecloud.config import settings
 from homecloud.dns.names import connection_info
 from homecloud.dns.zone import write_zone
-from homecloud.images.base import current_build, get_build
+from homecloud.images.base import current_build, emit_cloud_init_errors, get_build
 from homecloud.jobs import JobCancelled
 from homecloud.provision.catalog import resolve_roles
 from homecloud.provision.script import (
@@ -161,6 +161,7 @@ class VMDeployer:
             )
             self._emit_provision_log(vmid, emit, failed=result["exitcode"] not in (0, 2))
             if result["exitcode"] not in (0, 2):  # 2 = finished with warnings
+                emit_cloud_init_errors(pve, vmid, emit)
                 raise RuntimeError(
                     f"First-boot provisioning failed (cloud-init exit {result['exitcode']})"
                 )
