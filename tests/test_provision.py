@@ -51,7 +51,7 @@ def test_selection_is_returned_in_catalog_order_with_defaults_filled():
 
 
 def test_files_are_normalised():
-    [_, files] = resolve_roles(
+    [files, _] = resolve_roles(
         [
             {
                 "id": "files",
