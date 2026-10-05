@@ -1,5 +1,9 @@
 services:
   controller:
+    # Prod pulls the CI-built image (HOMECLOUD_TAG=sha-<short>); `compose build`
+    # still builds it locally for dev. The image runs as uid 1000, so the
+    # bind-mounted .homecloud and the named volumes it writes must be owned by 1000.
+    image: ghcr.io/gavinfancher/homecloud:${HOMECLOUD_TAG:-main}
     build:
       context: ../../
       dockerfile: infra/docker/Dockerfile
@@ -9,7 +13,7 @@ services:
       - "8080:8080"
     env_file: ../../.env
     volumes:
-      # state, jobs, and the controller's SSH key (controller_ed25519)
+      # the controller's SSH key (controller_ed25519); state lives in Postgres
       - ../../.homecloud:/app/.homecloud
       # controller writes Caddy site files into this volume
       - caddy_sites:/etc/caddy/sites

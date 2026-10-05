@@ -1,8 +1,10 @@
 name: Release
 
+# Every branch push gets an immutable sha-<short> image; only the default
+# branch also moves the `main` tag.
 on:
   push:
-    branches: [main]
+    branches: ['**']
   workflow_dispatch:
 
 permissions:
@@ -10,7 +12,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
