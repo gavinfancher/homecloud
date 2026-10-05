@@ -93,6 +93,7 @@ class VMDeployer:
         roles: list[dict],
         size_id: str = "custom",
         base_image_id: int | None = None,
+        mac_address: str | None = None,
         log: LogFn | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> dict:
@@ -131,7 +132,7 @@ class VMDeployer:
 
             # A MAC no other VM has → its own DHCP lease → its own IP. The
             # seed's network config is rendered from this MAC, so it goes first.
-            mac = pve.assign_unique_mac(vmid)
+            mac = pve.assign_unique_mac(vmid, mac_address)
             emit("info", f"Assigned MAC {mac}")
 
             memory_mb = int(memory_gb * 1024)

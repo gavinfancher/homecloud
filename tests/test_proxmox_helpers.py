@@ -147,3 +147,26 @@ def test_assign_unique_mac_never_reuses_a_node_mac():
 
     assert mac.lower() != shared.lower()
     assert client._api.puts == [(503, {"net0": f"virtio={mac},bridge=vmbr0"})]
+
+
+def _client_with(used, net0="virtio=BC:24:11:00:00:09,bridge=vmbr0"):
+    client = ProxmoxClient.__new__(ProxmoxClient)
+    client._api = _FakeApi()
+    client.node = "pve"
+    client.used_macs = lambda: set(used)
+    client.get_vm_config = lambda _vmid: {"net0": net0}
+    return client
+
+
+def test_assign_unique_mac_can_keep_a_known_mac():
+    client = _client_with({"bc:24:11:00:00:09"})
+    assert client.assign_unique_mac(501, "bc:24:11:5d:66:79") == "BC:24:11:5D:66:79"
+    assert client._api.puts == [(501, {"net0": "virtio=BC:24:11:5D:66:79,bridge=vmbr0"})]
+
+
+def test_assign_unique_mac_refuses_a_mac_still_in_use():
+    client = _client_with({"bc:24:11:5d:66:79"})
+    with pytest.raises(ValueError, match="still in use"):
+        client.assign_unique_mac(501, "BC:24:11:5D:66:79")
+    with pytest.raises(ValueError, match="Not a MAC"):
+        client.assign_unique_mac(501, "nope")

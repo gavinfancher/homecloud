@@ -303,6 +303,7 @@ def deploy_vm(body: DeployVMRequest) -> dict:
             "memory_gb": body.memory_gb,
             "disk_gb": body.disk_gb,
             "base_image_id": body.base_image_id,
+            "mac_address": body.mac_address,
             "roles": roles,
         },
     )

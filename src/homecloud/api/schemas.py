@@ -72,6 +72,8 @@ class DeployVMRequest(BaseModel):
     disk_gb: int | None = Field(None, ge=10, le=2000)
     # Defaults to the newest ready base image build.
     base_image_id: int | None = None
+    # Keep a known MAC — e.g. rebuilding a VM whose IP is reserved by MAC.
+    mac_address: str | None = Field(None, pattern=r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
     roles: list[RoleSelection] = Field(default_factory=list)
 
     @model_validator(mode="after")

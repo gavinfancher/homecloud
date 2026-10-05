@@ -29,6 +29,7 @@ _NON_LAN_IFACES = ("tailscale", "docker", "br-", "veth", "virbr", "cni", "flanne
 _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 # Proxmox's limit on agent/file-write content.
 _AGENT_WRITE_LIMIT = 61440
+_MAC_FORMAT = re.compile(r"[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}")
 _MAC_RE = re.compile(r"=([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
 
 
@@ -335,16 +336,26 @@ class ProxmoxClient:
                         macs.add(mac.lower())
         return macs
 
-    def assign_unique_mac(self, vmid: int) -> str:
-        """Give *vmid*'s ``net0`` a fresh MAC no other VM on the node uses.
+    def assign_unique_mac(self, vmid: int, mac: str | None = None) -> str:
+        """Give *vmid*'s ``net0`` a MAC no other VM on the node uses.
 
         Two VMs sharing a MAC get the same DHCP lease — the same IP — so every
         clone is re-addressed explicitly rather than trusting the clone to.
+        *mac* keeps a known address (a rebuild that must keep its DHCP
+        reservation); it is refused if any VM on the node still has it.
         """
         net0 = self.get_vm_config(vmid).get("net0", "")
         # The clone's current MAC counts as used too: it may be a copy of
         # another VM's, and the new one must differ from both.
-        mac = _random_mac(self.used_macs())
+        used = self.used_macs()
+        if mac is not None:
+            if not _MAC_FORMAT.fullmatch(mac):
+                raise ValueError(f"Not a MAC address: {mac!r}")
+            if mac.lower() in used:
+                raise ValueError(f"MAC {mac} is still in use by a VM on the node")
+            mac = mac.upper()
+        else:
+            mac = _random_mac(used)
         self._api.nodes(self.node).qemu(vmid).config.put(net0=_with_mac(net0, mac))
         return mac
 
