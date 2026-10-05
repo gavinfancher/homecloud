@@ -31,15 +31,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # --- runtime -----------------------------------------------------------------
 FROM ${PYTHON_IMAGE}
 
-# openssh-client: Ansible and the port scanner still reach VMs over SSH.
-# Removed in Stage 3 (API-only provisioning).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN groupadd --gid 1000 app \
     && useradd --uid 1000 --gid app --home-dir /app --no-create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /app/.homecloud \
+    && mkdir -p /app \
     && chown -R app:app /app
 
 COPY --from=build --chown=app:app /app/.venv /app/.venv

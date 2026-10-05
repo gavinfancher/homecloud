@@ -46,8 +46,8 @@ def import_state(path: Path) -> dict:
                     name=name,
                     vmid=int(record["vmid"]),
                     # Legacy instances were cloned from the old homecloud-base
-                    # template, which is not a source.
-                    source_id=None,
+                    # template, not from a base image build.
+                    base_image_id=None,
                     size_id=record.get("size_id") or "custom",
                     cores=record.get("cores"),
                     memory_mb=memory_mb,

@@ -4,7 +4,6 @@ import io
 import ipaddress
 import logging
 import re
-import socket
 import threading
 import time
 from collections.abc import Callable
@@ -26,6 +25,8 @@ _LAN_IP_CACHE_TTL = 60.0
 _NON_LAN_IFACES = ("tailscale", "docker", "br-", "veth", "virbr", "cni", "flannel")
 # Tailscale hands out CGNAT addresses; those are the tailnet IP, not the LAN one.
 _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+# Proxmox's limit on agent/file-write content.
+_AGENT_WRITE_LIMIT = 61440
 _MAC_RE = re.compile(r"=([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
 
 
@@ -286,31 +287,6 @@ class ProxmoxClient:
         if self.volume_exists(volid):
             self.delete_volume(volid)
 
-    def attach_native_cloudinit_drive(self, vmid: int) -> None:
-        """Give *vmid* Proxmox's own cloud-init drive on ``ide2``."""
-        self._api.nodes(self.node).qemu(vmid).config.put(ide2=f"{self.storage}:cloudinit")
-
-    def set_native_cloudinit(
-        self,
-        vmid: int,
-        *,
-        ciuser: str,
-        sshkeys: list[str],
-        ipconfig0: str = "ip=dhcp",
-    ) -> None:
-        """Set the login user, authorized keys and network via Proxmox's cloud-init.
-
-        Proxmox renders these onto the cloud-init drive itself, so no custom
-        user-data (and no snippets storage) is involved.
-        """
-        # Proxmox accepts newline-separated keys, all URL-encoded together.
-        key_str = "\n".join(k.strip().splitlines()[0] for k in sshkeys if k.strip())
-        self._api.nodes(self.node).qemu(vmid).config.put(
-            ciuser=ciuser,
-            sshkeys=quote(key_str, safe=""),
-            ipconfig0=ipconfig0,
-        )
-
     def resize_disk(self, vmid: int, disk: str, size_gb: int) -> None:
         self._api.nodes(self.node).qemu(vmid).resize.put(disk=disk, size=f"+{size_gb}G")
 
@@ -409,17 +385,20 @@ class ProxmoxClient:
     def delete_vm(self, vmid: int) -> str:
         return self._api.nodes(self.node).qemu(vmid).delete()
 
-    def guest_exec(self, vmid: int, command: list[str]) -> str:
-        result = self._api.nodes(self.node).qemu(vmid).agent("exec").post(command=command)
-        if isinstance(result, dict):
-            return result.get("out-data", "") or str(result)
-        return str(result)
-
-    def guest_run(self, vmid: int, command: list[str], *, timeout: int = 300) -> dict:
+    def guest_run(
+        self,
+        vmid: int,
+        command: list[str],
+        *,
+        timeout: int = 300,
+        check_cancel: Callable[[], None] | None = None,
+    ) -> dict:
         """Run a command in the guest and wait for it to exit.
 
         ``agent exec`` only returns a pid; the result has to be collected from
         ``agent exec-status``.  Returns ``{"exitcode", "out", "err"}``.
+        *check_cancel* is called on every poll and may raise to stop waiting
+        (the command itself keeps running in the guest).
         """
         started = self._api.nodes(self.node).qemu(vmid).agent("exec").post(command=command)
         pid = started.get("pid") if isinstance(started, dict) else None
@@ -428,6 +407,8 @@ class ProxmoxClient:
 
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if check_cancel is not None:
+                check_cancel()
             status = self._api.nodes(self.node).qemu(vmid).agent("exec-status").get(pid=pid)
             if status.get("exited"):
                 return {
@@ -437,6 +418,20 @@ class ProxmoxClient:
                 }
             time.sleep(2)
         raise TimeoutError(f"Guest command on VM {vmid} timed out after {timeout}s")
+
+    def guest_write_file(self, vmid: int, path: str, content: str) -> None:
+        """Write *content* to *path* in the guest through the agent.
+
+        Proxmox base64-encodes the content for QEMU and caps a single write at
+        60 KiB; larger content has to go through cloud-init instead.
+        """
+        data = content.encode()
+        if len(data) > _AGENT_WRITE_LIMIT:
+            raise ValueError(
+                f"{path} is {len(data)} bytes; the guest agent writes at most "
+                f"{_AGENT_WRITE_LIMIT} bytes at once"
+            )
+        self._api.nodes(self.node).qemu(vmid).agent("file-write").post(file=path, content=content)
 
     def wait_for_guest_file(
         self,
@@ -585,25 +580,6 @@ class ProxmoxClient:
         with ProxmoxClient._lan_ip_cache_lock:
             ProxmoxClient._lan_ip_cache[vmid] = (now, ip)
         return ip
-
-    @staticmethod
-    def wait_for_ssh(
-        ip: str,
-        *,
-        timeout: int = 180,
-        check_cancel: Callable[[], None] | None = None,
-    ) -> None:
-        """Block until *ip* accepts TCP connections on port 22."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if check_cancel is not None:
-                check_cancel()
-            try:
-                with socket.create_connection((ip, 22), timeout=5):
-                    return
-            except OSError:
-                time.sleep(3)
-        raise TimeoutError(f"SSH on {ip} did not come up within {timeout}s")
 
     def wait_for_vm_ip(
         self,

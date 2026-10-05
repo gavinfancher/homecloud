@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from homecloud.access import ssh_config_block
 from homecloud.api.schemas import (
+    BaseImageConfigRequest,
     DeployVMRequest,
     ProvisionRequest,
     PublishServiceRequest,
@@ -15,11 +16,10 @@ from homecloud.api.schemas import (
 from homecloud.auth import extract_token, get_clerk_auth
 from homecloud.config import settings
 from homecloud.dns.names import connection_info, private_fqdn
+from homecloud.images import base
 from homecloud.images.deployer import VMManager
-from homecloud.images.sources import list_sources
 from homecloud.jobs import job_store
 from homecloud.provision.catalog import RoleError, list_roles, resolve_roles
-from homecloud.provision.keys import controller_public_key
 from homecloud.proxmox.client import ProxmoxClient
 from homecloud.publish import publish_web, unpublish_web
 from homecloud.sizes import list_sizes
@@ -60,7 +60,14 @@ def _local_ip(vm: dict, proxmox: ProxmoxClient | None) -> str:
 
 
 def _merge_registered(vms: list[dict], proxmox: ProxmoxClient | None = None) -> list[dict]:
+    """Registered instances only, each merged with its live Proxmox status.
+
+    Other VMs on the node (the control VM itself, anything made by hand) are
+    left out, so the console can never stop or delete them.
+    """
     registered = list_registered_vms()
+    managed = {r["vmid"] for r in registered.values()}
+    vms = [vm for vm in vms if vm.get("vmid") in managed]
     for vm in vms:
         name = vm.get("name", "")
         if name in registered:
@@ -150,7 +157,7 @@ def dashboard() -> dict:
     running = sum(1 for vm in vms if vm.get("status") == "running")
     return {
         "setup_complete": is_setup_complete(),
-        "source_imported": _any_source_imported(proxmox),
+        "base_image_ready": base.current_build() is not None,
         "tailscale_tailnet": settings.tailscale_tailnet,
         "proxmox_node": settings.proxmox_node,
         "proxmox_storage": settings.proxmox_storage,
@@ -175,8 +182,7 @@ def setup_status() -> dict:
         "vm_ssh_user": settings.vm_ssh_user,
         "ssh_public_keys_count": len(keys),
         "ssh_public_keys": keys,
-        "controller_public_key": controller_public_key(),
-        "rebuild_note": "Changing SSH keys only affects instances deployed afterwards.",
+        "rebuild_note": "Changing SSH keys only affects base images built afterwards.",
     }
 
 
@@ -190,7 +196,7 @@ def complete_setup(body: SetupRequest) -> dict:
     return {
         "setup_complete": True,
         "ssh_public_keys_count": len(keys),
-        "rebuild_note": "Changing SSH keys only affects instances deployed afterwards.",
+        "rebuild_note": "Changing SSH keys only affects base images built afterwards.",
     }
 
 
@@ -208,38 +214,49 @@ def sizes_list() -> list[dict]:
     ]
 
 
-def _any_source_imported(proxmox: ProxmoxClient) -> bool:
-    try:
-        return any(s["imported"] for s in list_sources(proxmox))
-    except Exception:  # noqa: BLE001 — dashboard must render without the DB
-        logger.warning("Could not read sources", exc_info=True)
-        return False
-
-
 @router.get("/roles")
 def roles_list() -> list[dict]:
-    """The Ansible role catalog the create flow renders its configure step from."""
+    """The role catalog the create flow renders its configure step from."""
     return list_roles()
 
 
-@router.get("/sources")
-def sources_list() -> list[dict]:
-    """Stock distro images instances are cloned from, with import status."""
-    return list_sources()
+@router.get("/base-image")
+def base_image() -> dict:
+    """The editable base image definition, its builds, and the one deploys use."""
+    return {
+        "config": base.get_config(),
+        "current": base.current_build(),
+        "builds": base.list_builds(),
+    }
 
 
-@router.post("/sources/{source_id}/import")
-def source_import(source_id: str) -> dict:
-    """Import a source onto the node (download, import, bake the guest agent)."""
-    if source_id not in {s["id"] for s in list_sources()}:
-        raise HTTPException(404, f"Unknown source: {source_id}")
+@router.put("/base-image")
+def update_base_image(body: BaseImageConfigRequest) -> dict:
+    """Edit the definition. Takes effect on the next build, never on existing ones."""
+    try:
+        return base.update_config(
+            image_url=body.image_url,
+            packages=body.packages,
+            extra_user_data=body.extra_user_data,
+        )
+    except base.BaseImageError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/base-image/build")
+def build_base_image() -> dict:
+    """Build a new base image version from the current definition and SSH keys."""
+    try:
+        build_id = base.start_build()
+    except base.BaseImageError as exc:
+        raise HTTPException(400, str(exc)) from exc
     job = job_store.enqueue(
-        "import_source",
-        label=source_id,
-        meta={"source_id": source_id},
-        payload={"source_id": source_id},
+        "build_base_image",
+        label=f"base image v{build_id}",
+        meta={"build_id": build_id},
+        payload={"build_id": build_id},
     )
-    return {"job_id": job["id"]}
+    return {"job_id": job["id"], "build_id": build_id}
 
 
 @router.get("/jobs")
@@ -293,6 +310,8 @@ def get_vm(vmid: int) -> dict:
 def deploy_vm(body: DeployVMRequest) -> dict:
     if not is_setup_complete():
         raise HTTPException(400, "Upload your SSH public key in setup first")
+    if get_instance(body.name) is not None:
+        raise HTTPException(409, f"An instance named {body.name!r} already exists")
     roles = [r.model_dump() for r in body.roles]
     try:
         resolve_roles(roles)  # fail fast; the job resolves again
@@ -307,7 +326,7 @@ def deploy_vm(body: DeployVMRequest) -> dict:
             "cores": body.cores,
             "memory_gb": body.memory_gb,
             "disk_gb": body.disk_gb,
-            "source_id": body.source_id,
+            "base_image_id": body.base_image_id,
             "roles": [r["id"] for r in roles],
         },
         payload={
@@ -316,7 +335,7 @@ def deploy_vm(body: DeployVMRequest) -> dict:
             "cores": body.cores,
             "memory_gb": body.memory_gb,
             "disk_gb": body.disk_gb,
-            "source_id": body.source_id,
+            "base_image_id": body.base_image_id,
             "roles": roles,
         },
     )
@@ -325,7 +344,7 @@ def deploy_vm(body: DeployVMRequest) -> dict:
 
 @router.post("/vms/{name}/provision")
 def provision_vm(name: str, body: ProvisionRequest) -> dict:
-    """Re-run Ansible on an existing instance with a new role selection."""
+    """Re-run the role script on an existing instance with a new role selection."""
     _require_instance(name)
     roles = [r.model_dump() for r in body.roles]
     try:
@@ -343,6 +362,7 @@ def provision_vm(name: str, body: ProvisionRequest) -> dict:
 
 @router.post("/vms/{vmid}/start")
 def start_vm(vmid: int) -> dict:
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.start(vmid)
@@ -352,6 +372,7 @@ def start_vm(vmid: int) -> dict:
 
 @router.post("/vms/{vmid}/stop")
 def stop_vm(vmid: int) -> dict:
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.stop(vmid)
@@ -362,6 +383,7 @@ def stop_vm(vmid: int) -> dict:
 @router.post("/vms/{vmid}/suspend")
 def suspend_vm(vmid: int) -> dict:
     """Pause (suspend to RAM) a running instance."""
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.suspend(vmid)
@@ -372,6 +394,7 @@ def suspend_vm(vmid: int) -> dict:
 @router.post("/vms/{vmid}/resume")
 def resume_vm(vmid: int) -> dict:
     """Resume a previously suspended instance."""
+    _require_managed(vmid)
     manager = VMManager()
     try:
         return manager.resume(vmid)
@@ -380,18 +403,13 @@ def resume_vm(vmid: int) -> dict:
 
 
 @router.delete("/vms/{vmid}")
-def delete_vm(vmid: int, name: str | None = None) -> dict:
-    if not name:
-        for vm in ProxmoxClient().list_vms():
-            if vm.get("vmid") == vmid:
-                name = vm.get("name")
-                break
-    label = name or f"vm-{vmid}"
+def delete_vm(vmid: int) -> dict:
+    name = _require_managed(vmid)["name"]
     job = job_store.enqueue(
         "delete_vm",
-        label=label,
+        label=name,
         meta={"vmid": vmid, "name": name},
-        payload={"vmid": vmid, "name": name},
+        payload={"name": name},
     )
     return {"job_id": job["id"]}
 
@@ -407,6 +425,14 @@ def ssh_config_export() -> dict:
 # ---------------------------------------------------------------------------
 # Phase 05 — Port discovery + service routing
 # ---------------------------------------------------------------------------
+
+
+def _require_managed(vmid: int) -> dict:
+    """The registered instance with *vmid*, or 404 — other VMs are off limits."""
+    for instance in list_registered_vms().values():
+        if instance["vmid"] == vmid:
+            return instance
+    raise HTTPException(404, f"VM {vmid} is not a homecloud instance")
 
 
 def _require_instance(name: str) -> dict:

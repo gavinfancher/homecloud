@@ -19,13 +19,14 @@ _VALID_KEY_PREFIXES = ("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")
 # Instance record keys that map straight onto columns.
 _INSTANCE_FIELDS = (
     "vmid",
-    "source_id",
+    "base_image_id",
     "size_id",
     "cores",
     "memory_mb",
     "disk_gb",
     "local_ip",
     "tailscale_ip",
+    "tailscale_device_id",
     "roles",
     "web",
     "ports_seen",

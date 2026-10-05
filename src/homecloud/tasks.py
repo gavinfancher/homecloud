@@ -9,19 +9,17 @@ from __future__ import annotations
 
 import httpx
 
+from homecloud.images import base
 from homecloud.images.deployer import VMDeployer, VMManager
-from homecloud.images.sources import ensure_source_template
 from homecloud.jobs import Handler, JobContext
 from homecloud.ports import scan_ports as scan_instance_ports
 from homecloud.state import get_instance, set_instance_ports
 
 
-def import_source(ctx: JobContext, payload: dict) -> dict:
-    source_id = payload["source_id"]
-    template_id = ensure_source_template(
-        source_id, log=ctx.log, cancel_check=ctx.cancel_requested
-    )
-    return {"source_id": source_id, "template_id": template_id}
+def build_base_image(ctx: JobContext, payload: dict) -> dict:
+    build_id = payload["build_id"]
+    template_vmid = base.build(build_id, log=ctx.log, cancel_check=ctx.cancel_requested)
+    return {"build_id": build_id, "template_vmid": template_vmid}
 
 
 def deploy_vm(ctx: JobContext, payload: dict) -> dict:
@@ -38,12 +36,9 @@ def provision_vm(ctx: JobContext, payload: dict) -> dict:
 
 
 def delete_vm(ctx: JobContext, payload: dict) -> dict:
-    vmid, name = payload["vmid"], payload.get("name")
-    label = name or f"vm-{vmid}"
-    ctx.log("info", f"Deleting {label}…")
-    result = VMManager().delete(vmid, name=name, log=ctx.log)
-    ctx.log("info", f"Deleted {label}")
-    return result
+    name = payload["name"]
+    ctx.log("info", f"Deleting {name}…")
+    return VMManager().delete(name, log=ctx.log)
 
 
 def scan_ports(ctx: JobContext, payload: dict) -> dict:
@@ -59,7 +54,7 @@ def scan_ports(ctx: JobContext, payload: dict) -> dict:
 
 
 HANDLERS: dict[str, Handler] = {
-    "import_source": import_source,
+    "build_base_image": build_base_image,
     "deploy_vm": deploy_vm,
     "provision_vm": provision_vm,
     "delete_vm": delete_vm,

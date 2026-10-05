@@ -36,23 +36,72 @@ def db(settings, monkeypatch):
     engine.dispose()
 
 
-def test_migrate_is_idempotent_and_adopts_create_all_cloud_images(db):
+def test_migrate_is_idempotent_and_upgrades_a_pre_runner_database(db):
     from homecloud.db.migrate import migrate
 
     assert migrate(db) == []
-    # A database from before the runner: cloud_images exists, nothing recorded.
+    # Prod before the runner: create_all made cloud_images (with an imported
+    # row) and custom_images; nothing was recorded in schema_migrations.
     with db.begin() as conn:
-        conn.execute(text("DROP TABLE schema_migrations, ssh_keys, instances, job_logs, jobs"))
+        conn.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
+        conn.execute(
+            text(
+                "CREATE TABLE cloud_images (id VARCHAR(64) PRIMARY KEY, name VARCHAR(128) NOT NULL,"
+                " distro VARCHAR(32) NOT NULL, version VARCHAR(32) NOT NULL,"
+                " arch VARCHAR(16) NOT NULL, url TEXT NOT NULL, sha256 VARCHAR(64),"
+                " ssh_user VARCHAR(32) NOT NULL, builtin BOOLEAN NOT NULL, template_id INTEGER,"
+                " imported_at TIMESTAMP WITHOUT TIME ZONE,"
+                " created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now())"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO cloud_images VALUES ('debian-12', 'Debian', 'debian', '12', 'amd64',"
+                " 'https://x/d.qcow2', NULL, 'debian', true, 9100, now(), now())"
+            )
+        )
         conn.execute(text("CREATE TABLE custom_images (id text)"))
-    assert migrate(db) == ["001_init"]
+    assert migrate(db) == ["001_init", "002_base_images"]
     with db.connect() as conn:
         tables = set(
             conn.scalars(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
         )
-        catalog = conn.scalar(text("SELECT count(*) FROM cloud_images"))
-    assert "custom_images" not in tables
-    assert {"instances", "jobs", "job_logs", "ssh_keys", "cloud_images"} <= tables
-    assert catalog > 0
+        url = conn.scalar(text("SELECT image_url FROM base_image_config"))
+    assert not {"custom_images", "cloud_images"} & tables
+    assert {"instances", "jobs", "job_logs", "ssh_keys", "base_images"} <= tables
+    assert "resolute" in url
+
+
+def test_base_image_config_and_builds(db):
+    from homecloud import state
+    from homecloud.images import base
+
+    with pytest.raises(base.BaseImageError, match="SSH public key"):
+        base.start_build()
+    state.save_setup(ssh_public_keys=[KEY])
+
+    with pytest.raises(base.BaseImageError):
+        base.update_config(image_url="https://x/y.iso", packages=[], extra_user_data="")
+    config = base.update_config(
+        image_url="https://x/release-1/u.img", packages=[" jq ", ""], extra_user_data="a: 1\n"
+    )
+    assert config["packages"] == ["jq"]
+
+    first = base.start_build()
+    assert base.current_build() is None
+    assert base.get_build(first)["ssh_keys"] == [KEY]
+    assert base.get_build(first)["image_url"] == "https://x/release-1/u.img"
+
+    # Editing the config afterwards does not touch the snapshot.
+    base.update_config(image_url="https://x/release-2/u.img", packages=[], extra_user_data="")
+    assert base.get_build(first)["packages"] == ["jq"]
+
+    base._finish_build(first, status="ready", template_vmid=9100)
+    second = base.start_build()
+    assert base.current_build()["id"] == first
+    base.fail_unfinished_builds()
+    assert base.get_build(second)["status"] == "failed"
+    assert [b["id"] for b in base.list_builds()] == [second, first]
 
 
 def test_ssh_keys_replace_and_setup(db):
@@ -234,6 +283,6 @@ def test_import_legacy_state_is_idempotent(db, tmp_path):
     assert second == {"ssh_keys_added": [], "instances_added": [], "instances_skipped": ["pixie"]}
 
     vm = state.get_instance("pixie")
-    assert vm["source_id"] is None and vm["roles"] == []
+    assert vm["base_image_id"] is None and vm["roles"] == []
     assert vm["tailscale_ip"] == "100.125.128.54" and vm["disk_gb"] == 50
     assert state.get_ssh_public_keys() == [KEY]

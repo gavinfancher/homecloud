@@ -2,14 +2,14 @@ import pytest
 
 from homecloud.provision import catalog
 from homecloud.provision.catalog import ROLES_DIR, RoleError, resolve_roles
-from homecloud.provision.runner import build_playbook
+from homecloud.provision.script import RENDERERS
 
 
 def test_roles_dir_ships_every_role():
     shipped = {p.name for p in ROLES_DIR.iterdir() if (p / "homecloud.yml").exists()}
     assert shipped == set(catalog.load_catalog())
-    for role in shipped:
-        assert (ROLES_DIR / role / "tasks" / "main.yml").exists()
+    # Every catalog role has a script renderer, and nothing else does.
+    assert shipped == set(RENDERERS)
 
 
 def test_catalog_is_in_play_order():
@@ -45,7 +45,7 @@ def test_selection_is_returned_in_catalog_order_with_defaults_filled():
     assert [r["id"] for r in result] == ["tailscale", "packages", "commands"]
     by_id = {r["id"]: r["vars"] for r in result}
     assert by_id["tailscale"] == {"tailscale_accept_routes": True, "tailscale_ssh": True}
-    assert "curl" in by_id["packages"]["packages"]
+    assert by_id["packages"] == {"packages": []}
     assert by_id["commands"] == {"commands": ["echo hi"]}
 
 
@@ -99,19 +99,3 @@ def test_files_are_normalised():
 def test_invalid_selections_are_rejected(selection, message):
     with pytest.raises(RoleError, match=message):
         resolve_roles(selection)
-
-
-def test_build_playbook():
-    roles = resolve_roles([{"id": "docker"}])
-    [play] = build_playbook(roles)
-    assert play["hosts"] == "all"
-    assert play["become"] is True
-    assert play["gather_facts"] is True
-    assert play["roles"] == [
-        {"role": "tailscale", "vars": {"tailscale_accept_routes": True, "tailscale_ssh": False}},
-        {"role": "docker", "vars": {}},
-    ]
-
-
-def test_build_playbook_empty():
-    assert build_playbook([])[0]["roles"] == []

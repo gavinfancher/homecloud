@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text, func
+from sqlalchemy import ForeignKey, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -18,45 +18,56 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-class CloudImage(Base):
-    """An upstream distro cloud image — a *source* instances are cloned from.
+class BaseImageConfig(Base):
+    """The single editable base image definition (row id 1)."""
 
-    ``template_id`` caches the source template produced by importing ``url``
-    on the node and baking in the guest agent (see ``images/sources.py``).
-    """
+    __tablename__ = "base_image_config"
 
-    __tablename__ = "cloud_images"
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    image_url: Mapped[str] = mapped_column(Text)
+    packages: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    extra_user_data: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(128))
-    distro: Mapped[str] = mapped_column(String(32))
-    version: Mapped[str] = mapped_column(String(32))
-    arch: Mapped[str] = mapped_column(String(16), default="amd64")
-    url: Mapped[str] = mapped_column(Text)
-    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Login the distro bakes into its cloud image (ubuntu, debian, fedora…).
-    ssh_user: Mapped[str] = mapped_column(String(32), default="ubuntu")
-    builtin: Mapped[bool] = mapped_column(default=False)
+    def to_dict(self) -> dict:
+        return {
+            "image_url": self.image_url,
+            "packages": self.packages,
+            "extra_user_data": self.extra_user_data,
+            "updated_at": _iso(self.updated_at),
+        }
 
-    template_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    imported_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
+class BaseImage(Base):
+    """One build of the base image: a config snapshot and the template it made."""
+
+    __tablename__ = "base_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(Text, default="building")
+    image_url: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str | None] = mapped_column(Text)
+    ssh_keys: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    packages: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    extra_user_data: Mapped[str] = mapped_column(Text, default="")
+    template_vmid: Mapped[int | None]
+    error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    built_at: Mapped[datetime | None]
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
-            "name": self.name,
-            "distro": self.distro,
-            "version": self.version,
-            "arch": self.arch,
-            "url": self.url,
+            "status": self.status,
+            "image_url": self.image_url,
             "sha256": self.sha256,
-            "ssh_user": self.ssh_user,
-            "builtin": self.builtin,
-            "template_id": self.template_id,
-            "imported": self.template_id is not None,
-            "imported_at": _iso(self.imported_at),
+            "ssh_keys": self.ssh_keys,
+            "packages": self.packages,
+            "extra_user_data": self.extra_user_data,
+            "template_vmid": self.template_vmid,
+            "error": self.error,
+            "created_at": _iso(self.created_at),
+            "built_at": _iso(self.built_at),
         }
 
 
@@ -75,13 +86,17 @@ class Instance(Base):
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     vmid: Mapped[int] = mapped_column(unique=True)
-    source_id: Mapped[str | None] = mapped_column(Text)
+    # NULL for instances cloned from a template that predates base images.
+    base_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("base_images.id", ondelete="SET NULL")
+    )
     size_id: Mapped[str] = mapped_column(Text, default="custom")
     cores: Mapped[int | None]
     memory_mb: Mapped[int | None]
     disk_gb: Mapped[int | None]
     local_ip: Mapped[str | None] = mapped_column(Text)
     tailscale_ip: Mapped[str | None] = mapped_column(Text)
+    tailscale_device_id: Mapped[str | None] = mapped_column(Text)
     roles: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     web: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     ports_seen: Mapped[list[Any] | None] = mapped_column(JSONB)
@@ -96,7 +111,8 @@ class Instance(Base):
             "ip": self.tailscale_ip,
             "tailscale_ip": self.tailscale_ip,
             "local_ip": self.local_ip,
-            "source_id": self.source_id,
+            "base_image_id": self.base_image_id,
+            "tailscale_device_id": self.tailscale_device_id,
             "size_id": self.size_id,
             "cores": self.cores,
             "memory_mb": self.memory_mb,

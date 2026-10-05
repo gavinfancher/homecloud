@@ -45,15 +45,8 @@ def session_scope() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Apply pending migrations and seed the built-in cloud image catalog.
-
-    Safe to call on every startup: applied migrations are skipped and seeding
-    skips catalog rows that are already present.
-    """
+    """Apply pending migrations. Safe on every startup: applied ones are skipped."""
     from homecloud.db.migrate import migrate
-    from homecloud.images.catalog import seed_catalog
 
     migrate(get_engine())
-    with session_scope() as session:
-        seed_catalog(session)
     logger.info("Database ready")

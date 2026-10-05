@@ -17,8 +17,6 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "psycopg[binary]>=3.2.3",
     "pycdlib>=1.21.0",
-    "ansible-core>=2.21.4",
-    "ansible-runner>=2.4.3",
 ]
 
 [project.optional-dependencies]

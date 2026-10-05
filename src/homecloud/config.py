@@ -22,10 +22,13 @@ class Settings(BaseSettings):
     # Empty → sources are unavailable, so nothing can be deployed.
     database_url: str = ""
 
-    # Tailscale — VMs join tailnet; SSH via MagicDNS (name.tailnet.ts.net)
+    # Tailscale — the API key lists/deletes devices and mints per-VM auth keys
     tailscale_api_key: str = ""
     tailscale_tailnet: str = ""
-    tailscale_auth_key: str = ""
+    # Tags for the per-VM auth keys the controller mints (comma-separated,
+    # e.g. "tag:homecloud"). Each tag needs a tagOwners entry in the tailnet
+    # policy. Empty → devices are owned by the API key's user.
+    tailscale_tags: str = ""
 
     # VM SSH user
     vm_ssh_user: str = "ubuntu"

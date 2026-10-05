@@ -15,6 +15,8 @@ from homecloud.api.routes import auth_router, public_router, router
 from homecloud.auth import require_auth
 from homecloud.config import settings
 from homecloud.db import init_db
+from homecloud.dns.zone import write_zone
+from homecloud.images.base import fail_unfinished_builds
 from homecloud.jobs import JobRunner
 from homecloud.tasks import HANDLERS
 
@@ -26,6 +28,10 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     # No database, no controller: fail startup so the container restarts
     # until Postgres is reachable, instead of serving half a console.
     init_db()
+    # The zone file is derived from the instances table; rebuild it so CoreDNS
+    # never serves a stale copy left over from before a restart.
+    write_zone()
+    fail_unfinished_builds()
     runner = JobRunner(HANDLERS)
     runner.start()
     try:

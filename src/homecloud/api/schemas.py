@@ -73,7 +73,8 @@ class DeployVMRequest(BaseModel):
     cores: int | None = Field(None, ge=1, le=32)
     memory_gb: float | None = Field(None, ge=0.5, le=64)
     disk_gb: int | None = Field(None, ge=10, le=2000)
-    source_id: str = Field(..., description="Imported source image, e.g. 'ubuntu-24.04'")
+    # Defaults to the newest ready base image build.
+    base_image_id: int | None = None
     roles: list[RoleSelection] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -122,6 +123,14 @@ class DeployVMRequest(BaseModel):
                 self.size_id = "custom"
 
         return self
+
+
+class BaseImageConfigRequest(BaseModel):
+    """Body for ``PUT /api/base-image``."""
+
+    image_url: str = Field(..., min_length=8)
+    packages: list[str] = Field(default_factory=list)
+    extra_user_data: str = ""
 
 
 class PublishServiceRequest(BaseModel):

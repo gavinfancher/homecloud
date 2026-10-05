@@ -1,10 +1,10 @@
-"""The role catalog: Ansible roles shipped in ``provision/roles`` plus their UI metadata.
+"""The role catalog: the roles in ``provision/roles`` and their UI metadata.
 
-Each role directory holds an ordinary Ansible role and a ``homecloud.yml``
-describing it to the console — label, description, whether it is required
-or pre-selected, where it runs in the play, and the variables the create flow renders a form
-for. Requests are validated against that metadata here, so the playbook the
-runner generates only ever contains known roles with well-typed variables.
+Each role directory holds a ``homecloud.yml`` describing it to the console —
+label, description, whether it is required or pre-selected, where it runs in
+the script, and the variables the create flow renders a form for. Requests are
+validated against that metadata here, so ``provision.script`` only ever renders
+known roles with well-typed variables.
 """
 
 from __future__ import annotations

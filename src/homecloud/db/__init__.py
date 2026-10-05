@@ -1,11 +1,20 @@
 """Postgres persistence — all controller state lives here."""
 
-from homecloud.db.models import Base, CloudImage, Instance, Job, JobLog, SshKey
+from homecloud.db.models import (
+    Base,
+    BaseImage,
+    BaseImageConfig,
+    Instance,
+    Job,
+    JobLog,
+    SshKey,
+)
 from homecloud.db.session import init_db, session_scope
 
 __all__ = [
     "Base",
-    "CloudImage",
+    "BaseImage",
+    "BaseImageConfig",
     "Instance",
     "Job",
     "JobLog",

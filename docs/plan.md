@@ -54,7 +54,13 @@ Jobs: the API inserts a row, and a runner thread in the same process claims work
 
 `state.py` and `jobs.py` now use Postgres. `provision/keys.py` (the controller SSH key in `.homecloud/`) stays until Stage 3 removes SSH. `base_images` arrives in Stage 3 as `002_*.sql`.
 
-### Stage 3: API-only provisioning
+### Stage 3: API-only provisioning — built, not yet deployed
+
+Prod prerequisites before the first build:
+- **Proxmox storage `local` needs the `import` content type.** Today it has `backup,iso,snippets,vztmpl`, so `download-url` refuses to fetch the cloud image. Fix: `pvesm set local --content backup,iso,snippets,vztmpl,import`, or Datacenter → Storage → local → Content.
+- `TAILSCALE_API_KEY` mints the per-VM keys (an OAuth client can replace it later). `TAILSCALE_TAGS` is optional; set it only once the tailnet policy has `tagOwners` for the tag.
+- The console changes ship with the frontend build. The old console calls `/api/sources`, which no longer exists, so deploy the backend and frontend together.
+
 **Base image** (one definition, editable from the console and the API):
 1. Proxmox `download-url` fetches the Ubuntu 26.04.1 cloud image. The URL is pinned to a release serial and checked against `SHA256SUMS`.
 2. Create the VM, import the disk, attach a bake seed ISO. The seed contains the `qemu-guest-agent` install, `dhcp-identifier: mac`, `ubuntu` with the selected SSH keys in `authorized_keys`, the selected `packages`, `user_data_extra`, and Tailscale *installed but not joined*.
@@ -62,13 +68,13 @@ Jobs: the API inserts a row, and a runner thread in the same process claims work
 
 **Deploy**:
 1. Clone the template, set resources, resize the disk.
-2. Mint a **per-VM, single-use, pre-authorized, tagged** Tailscale auth key through the Tailscale API (OAuth client). This replaces the long-lived `TAILSCALE_AUTH_KEY`.
+2. Mint a **per-VM, single-use, pre-authorized, tagged** Tailscale auth key through the Tailscale API. This replaces the long-lived `TAILSCALE_AUTH_KEY`. As built: minted with `TAILSCALE_API_KEY`, single-use, with a 1h expiry, tagged when `TAILSCALE_TAGS` is set.
 3. Render the instance user-data: hostname, extra keys, `tailscale up --authkey … --hostname <name>`, and role fragments.
 4. Upload it as the seed ISO and start the VM.
 5. Wait on the guest agent for `cloud-init status --wait`, then detach and delete the seed ISO, which contains the auth key.
 6. Get the Tailscale IP from the Tailscale API and create the DNS records (§4).
 
-**Roles** become cloud-init fragments instead of Ansible roles: `packages`, `write_files`, `runcmd` (docker, uv, tailscale settings, files, commands). **Reconfigure** runs the same fragments through `agent/file-write` and `agent/exec`, which needs no SSH. Ansible, `ansible-runner` and the controller keypair are removed.
+**Roles** become one idempotent bash script (`provision/script.py`) instead of Ansible roles. cloud-init writes it from the seed and runs it from `runcmd`. **Reconfigure** writes the same script through `agent/file-write` and runs it through `agent/exec`, which needs no SSH. Output goes to `/var/log/homecloud-provision.log`, and its tail is copied into the job log. Ansible, `ansible-runner` and the controller keypair are removed.
 
 **Port scan**: `ss -H -tlnp` over `agent/exec` via `guest_run`. This also fixes the existing bug where `guest_exec` returned a pid instead of output.
 

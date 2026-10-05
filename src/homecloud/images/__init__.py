@@ -1,1 +1,1 @@
-"""Source images and the VM deployer."""
+"""The base image builder and the VM deployer."""
