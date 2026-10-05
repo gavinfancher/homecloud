@@ -45,6 +45,7 @@ app = FastAPI(
     description="Control plane for Proxmox-based instances — Tailscale MagicDNS",
     version="0.3.0",
     lifespan=lifespan,
+    root_path=settings.root_path,
 )
 
 # CORS for the Cloudflare Pages SPA (comma-separated origins). No-op when unset.

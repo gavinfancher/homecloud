@@ -15,6 +15,8 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       COREDNS_ZONE_DIR: /zones
+      # The tunnel routes api.gavinf.com/homecloud* here without stripping it.
+      ROOT_PATH: /homecloud
       # Pass-through from Infisical:
       DATABASE_URL:
       PROXMOX_HOST:
@@ -64,7 +66,7 @@ services:
       retries: 10
 
   # Remote-managed tunnel: routes live in the Cloudflare dashboard
-  # (homecloud-api.gavinf.com → http://api:8080).
+  # (api.gavinf.com, path ^/homecloud → http://api:8080).
   cloudflared:
     image: cloudflare/cloudflared:2026.9.3
     container_name: homecloud-cloudflared

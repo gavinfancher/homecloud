@@ -10,7 +10,7 @@ One control VM (`ubuntu@100.74.161.39`) running one Docker Compose stack:
 |---------------|-----------------------------------------|----------------------------------------------------|
 | `api`         | `ghcr.io/gavinfancher/homecloud:<sha>`  | FastAPI + DB-backed job runner in one process      |
 | `postgres`    | `postgres:18.4`                         | named volume, **all** state lives here             |
-| `cloudflared` | `cloudflare/cloudflared:<pinned>`       | tunnel `homecloud-api.gavinf.com` → `http://api:8080` |
+| `cloudflared` | `cloudflare/cloudflared:<pinned>`       | tunnel `api.gavinf.com/homecloud` → `http://api:8080` |
 | `coredns`     | `coredns/coredns:<pinned>`              | split DNS for `dns.gavinf.com`, bound to the VM's tailnet IP:53 |
 
 Everything else is removed: Caddy, Ansible, the `ssh/` mount, `.homecloud/*.json` and `.env` files on disk. The CoreDNS zone file is a *derived* artifact: it is rebuilt from the `instances` table on startup and on every change, and is never read back, so all state really is in Postgres.
@@ -109,7 +109,7 @@ Each step is idempotent, so a failed teardown can be re-run.
    1. stop the old stack (`docker compose -p homecloud down`, **keeping the `postgres_data` volume**)
    2. start the new stack against the same volume
    3. run `import-legacy`
-   4. point the tunnel ingress for `homecloud-api.gavinf.com` at `http://api:8080`
+   4. point the tunnel ingress for `api.gavinf.com` (path `^/homecloud`) at `http://api:8080`
    5. switch DNS for the two existing VMs (§4)
 4. Verify:
    - the console loads
@@ -153,7 +153,7 @@ Issues:
    - The alternative is to keep CoreDNS: one more container and the control VM's tailnet IP stays load-bearing.
 3. **TLS depth.** Cloudflare's free Universal SSL covers `gavinf.com` and `*.gavinf.com` only, one level deep. That doesn't matter for grey-cloud records pointing at tailnet IPs. But any *proxied* public app at `x.pixie.dns.gavinf.com` gets **no edge certificate** without Advanced Certificate Manager. This is why public apps should get single-label names (`<svc>-<vm>.gavinf.com`) if they come back.
 4. **Publishing apps publicly.** Recommendation: **defer**. If it comes back, the simplest no-Caddy, no-SSH version is a tunnel ingress rule added through the Cloudflare API, with Cloudflare Access as the gate instead of Clerk forward-auth. But `cloudflared` would then need a route to the tailnet IPs, which brings host tailnet routing back.
-5. **Control-plane names stay**: console `homecloud.gavinf.com` (Worker, already in the Clerk allowlist) and API `homecloud-api.gavinf.com` (tunnel → `api:8080`). `proxmox.gavinf.com → 10.0.0.100:8006` stays on the same tunnel; this is unchanged, and the plan doesn't make the tunnel config any less exposed.
+5. **Control-plane names stay**: console `homecloud.gavinf.com` (Worker, already in the Clerk allowlist) and API `api.gavinf.com/homecloud` (tunnel, path `^/homecloud` → `api:8080`; the api serves under `ROOT_PATH=/homecloud`). `proxmox.gavinf.com → 10.0.0.100:8006` stays on the same tunnel; this is unchanged, and the plan doesn't make the tunnel config any less exposed.
 6. **Tunnel config.** Keep it remote-managed (dashboard or API), so `cloudflared` needs only `TUNNEL_TOKEN` and no config file.
 7. **Cloudflare API token** (Infisical), scoped to `Zone:DNS:Edit` on `gavinf.com`. Add `Account:Cloudflare Tunnel:Edit` only if #4 comes back.
 8. **Migrating the existing VMs.**

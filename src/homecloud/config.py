@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Controller listen address
     controller_host: str = "0.0.0.0"
     controller_port: int = 8080
+    # Public path prefix the tunnel routes under (api.gavinf.com/homecloud).
+    # Requests work with or without it; /docs and redirects include it.
+    root_path: str = ""
 
     # Private zone for instance names: <vm>.<domain> and *.<vm>.<domain>,
     # served by CoreDNS to the tailnet through Tailscale split DNS.

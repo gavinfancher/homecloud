@@ -226,7 +226,7 @@ export function createApi(getToken: TokenGetter) {
       }
       if (e instanceof TypeError) {
         throw new Error(
-          `Network error calling ${API_BASE || 'same-origin'}${path} — API unreachable (check homecloud-api.gavinf.com / tunnel)`,
+          `Network error calling ${API_BASE || 'same-origin'}${path} — API unreachable (check api.gavinf.com/homecloud / tunnel)`,
           { cause: e },
         )
       }
