@@ -12,10 +12,10 @@ import {
   createApi,
   CONN_FAIL_THRESHOLD,
   type Api,
+  type BaseImageState,
   type Dashboard,
   type RoleSpec,
   type Size,
-  type Source,
   type TokenGetter,
   type VM,
 } from '../api'
@@ -25,14 +25,14 @@ interface Store {
   dashboard: Dashboard | null
   vms: VM[]
   sizes: Size[]
-  /** Stock distro images to clone from. Empty when the controller has no database. */
-  sources: Source[]
-  /** The Ansible role catalog the create/reconfigure flows render. */
+  /** Base image definition and builds; null until loaded (or when unavailable). */
+  baseImage: BaseImageState | null
+  /** The role catalog the create/reconfigure flows render. */
   roles: RoleSpec[]
   ready: boolean
   connError: string | null
   refresh: () => Promise<void>
-  refreshSources: () => Promise<void>
+  refreshBaseImage: () => Promise<void>
   activeJob: string | null
   openJob: (id: string) => void
   closeJob: () => void
@@ -59,7 +59,7 @@ export function StoreProvider({
   const [dashboard, setDashboard] = useState<Dashboard | null>(null)
   const [vms, setVms] = useState<VM[]>([])
   const [sizes, setSizes] = useState<Size[]>([])
-  const [sources, setSources] = useState<Source[]>([])
+  const [baseImage, setBaseImage] = useState<BaseImageState | null>(null)
   const [roles, setRoles] = useState<RoleSpec[]>([])
   const [ready, setReady] = useState(false)
   const [connError, setConnError] = useState<string | null>(null)
@@ -99,22 +99,22 @@ export function StoreProvider({
     setReady(true)
   }, [api])
 
-  const refreshSources = useCallback(async () => {
+  const refreshBaseImage = useCallback(async () => {
     try {
-      setSources(await api.sources())
+      setBaseImage(await api.baseImage())
     } catch {
-      /* 503 when no database is configured — the picker stays empty */
+      /* controller unreachable — keep the last known state */
     }
   }, [api])
 
   useEffect(() => {
     api.sizes().then(setSizes).catch(() => {})
     api.roles().then(setRoles).catch(() => {})
-    Promise.resolve().then(refreshSources)
+    Promise.resolve().then(refreshBaseImage)
     Promise.resolve().then(refresh)
     const t = setInterval(refresh, activeJob ? 8000 : 5000)
     return () => clearInterval(t)
-  }, [api, refresh, refreshSources, activeJob])
+  }, [api, refresh, refreshBaseImage, activeJob])
 
   const value = useMemo<Store>(
     () => ({
@@ -122,12 +122,12 @@ export function StoreProvider({
       dashboard,
       vms,
       sizes,
-      sources,
+      baseImage,
       roles,
       ready,
       connError,
       refresh,
-      refreshSources,
+      refreshBaseImage,
       activeJob,
       openJob: setActiveJob,
       closeJob: () => setActiveJob(null),
@@ -137,12 +137,12 @@ export function StoreProvider({
       dashboard,
       vms,
       sizes,
-      sources,
+      baseImage,
       roles,
       ready,
       connError,
       refresh,
-      refreshSources,
+      refreshBaseImage,
       activeJob,
     ],
   )

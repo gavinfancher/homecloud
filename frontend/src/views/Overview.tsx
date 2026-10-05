@@ -22,14 +22,13 @@ export function Overview() {
 
   return (
     <div className="view">
-      {dashboard && !dashboard.source_imported && (
+      {dashboard && !dashboard.base_image_ready && (
         <div className="callout callout-warn">
           <div>
-            <strong>No source image imported.</strong> Import one (e.g. Ubuntu 24.04) before
-            creating instances.
+            <strong>No base image built yet.</strong> Build one before creating instances.
           </div>
-          <button className="btn btn-sm" onClick={() => navigate('/sources')}>
-            Go to Sources
+          <button className="btn btn-sm" onClick={() => navigate('/base-image')}>
+            Go to Base image
           </button>
         </div>
       )}
@@ -56,10 +55,10 @@ export function Overview() {
             <Row label="Storage" value={dashboard?.proxmox_storage || '—'} />
             <Row label="Tailnet" value={dashboard?.tailscale_tailnet || 'not configured'} />
             <Row
-              label="Sources"
+              label="Base image"
               value={
-                <Pill status={dashboard?.source_imported ? 'completed' : 'failed'}>
-                  {dashboard?.source_imported ? 'Imported' : 'None imported'}
+                <Pill status={dashboard?.base_image_ready ? 'completed' : 'failed'}>
+                  {dashboard?.base_image_ready ? 'Ready' : 'Not built'}
                 </Pill>
               }
             />

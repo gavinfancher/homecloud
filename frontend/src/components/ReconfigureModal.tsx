@@ -5,7 +5,7 @@ import { RoleEditor, defaultSelection, normalizeSelection, selectionValid } from
 import { useStore } from '../lib/store'
 import { useToast } from './Toast'
 
-/** Edit an instance's roles and re-run Ansible against it. */
+/** Edit an instance's roles and re-run them through the guest agent. */
 export function ReconfigureModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
   const { api, roles, refresh, openJob } = useStore()
   const toast = useToast()
@@ -48,8 +48,8 @@ export function ReconfigureModal({ vm, onClose }: { vm: VM; onClose: () => void 
         <form className="modal-form" onSubmit={submit}>
           <div className="modal-body">
             <small className="hint">
-              Re-runs Ansible with these roles. Turning a role off stops managing it; it does not
-              uninstall anything.
+              Re-runs these roles on the instance through the QEMU guest agent. Turning a role off
+              stops managing it; it does not uninstall anything.
             </small>
             <RoleEditor catalog={roles} value={selection} onChange={setSelection} />
           </div>

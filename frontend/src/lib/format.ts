@@ -19,6 +19,11 @@ export function clock(iso?: string): string {
   return iso.slice(11, 19)
 }
 
+/** Base image builds are versioned by id: `v<id>`. */
+export function baseVersion(id: number): string {
+  return `v${id}`
+}
+
 export function titleCase(s: string): string {
   return s.replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }

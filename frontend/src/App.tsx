@@ -17,17 +17,17 @@ import { BYPASS_AUTH, noToken } from './lib/auth'
 import { APP_VERSION } from './lib/version'
 import { StoreProvider, useStore } from './lib/store'
 import { Activity } from './views/Activity'
-import { Sources } from './views/Sources'
+import { BaseImage } from './views/BaseImage'
 import { Instances } from './views/Instances'
 import { Overview } from './views/Overview'
 import { Settings } from './views/Settings'
 
-type ViewId = 'overview' | 'instances' | 'sources' | 'activity' | 'settings'
+type ViewId = 'overview' | 'instances' | 'base-image' | 'activity' | 'settings'
 
 const NAV: { id: ViewId; path: string; label: string; icon: ReactNode }[] = [
   { id: 'overview', path: '/overview', label: 'Overview', icon: <IconOverview /> },
   { id: 'instances', path: '/instances', label: 'Instances', icon: <IconInstances /> },
-  { id: 'sources', path: '/sources', label: 'Sources', icon: <IconImages /> },
+  { id: 'base-image', path: '/base-image', label: 'Base image', icon: <IconImages /> },
   { id: 'activity', path: '/activity', label: 'Activity', icon: <IconActivity /> },
   { id: 'settings', path: '/settings', label: 'Settings', icon: <IconSettings /> },
 ]
@@ -145,7 +145,8 @@ function Console({ devBypass = false }: { devBypass?: boolean }) {
             <Route path="/" element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<Overview />} />
             <Route path="/instances" element={<Instances />} />
-            <Route path="/sources" element={<Sources />} />
+            <Route path="/base-image" element={<BaseImage />} />
+            <Route path="/sources" element={<Navigate to="/base-image" replace />} />
             <Route path="/activity" element={<Activity />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/overview" replace />} />

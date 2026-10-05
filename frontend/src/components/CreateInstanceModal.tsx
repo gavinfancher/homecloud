@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { RoleSelection } from '../api'
 import { IconClose, IconSettings } from './Icons'
 import { RoleEditor, defaultSelection, selectionValid } from './RoleEditor'
+import { baseVersion, relativeTime } from '../lib/format'
 import { useStore } from '../lib/store'
 import { useToast } from './Toast'
 
@@ -15,7 +16,7 @@ const LIMITS = {
 const CUSTOM = 'custom'
 
 export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
-  const { api, sizes, sources, roles, refresh, openJob } = useStore()
+  const { api, sizes, baseImage, refreshBaseImage, roles, refresh, openJob } = useStore()
   const toast = useToast()
   const navigate = useNavigate()
   const [name, setName] = useState('')
@@ -23,14 +24,18 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
   const [cores, setCores] = useState(2)
   const [memoryGb, setMemoryGb] = useState(4)
   const [diskGb, setDiskGb] = useState(40)
-  const imported = sources.filter((s) => s.imported)
-  // Sources and roles can arrive after the modal opens; until the user picks,
-  // follow the first imported source and the catalog defaults.
-  const [pickedSource, setSourceId] = useState<string | null>(null)
-  const sourceId = pickedSource ?? imported[0]?.id ?? ''
+  // New instances clone the current (newest ready) base image build.
+  const base = baseImage?.current ?? null
+  // Roles can arrive after the modal opens; until the user edits, follow the
+  // catalog defaults.
   const [edited, setSelection] = useState<RoleSelection[] | null>(null)
   const selection = edited ?? defaultSelection(roles)
   const [busy, setBusy] = useState(false)
+
+  // A build may have finished since the store last looked.
+  useEffect(() => {
+    refreshBaseImage()
+  }, [refreshBaseImage])
 
   const nameValid = /^[a-z][a-z0-9-]{1,30}$/.test(name)
   const isCustom = sizeId === CUSTOM
@@ -40,7 +45,7 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
   const customValid =
     inRange(cores, 'cores') && inRange(memoryGb, 'memory_gb') && inRange(diskGb, 'disk_gb')
   const canSubmit =
-    nameValid && (!isCustom || customValid) && sourceId !== '' && selectionValid(selection)
+    nameValid && (!isCustom || customValid) && base !== null && selectionValid(selection)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -50,7 +55,7 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
       const size = isCustom
         ? { size_id: CUSTOM, cores, memory_gb: memoryGb, disk_gb: diskGb }
         : { size_id: sizeId }
-      const { job_id } = await api.deploy({ name, ...size, source_id: sourceId, roles: selection })
+      const { job_id } = await api.deploy({ name, ...size, base_image_id: base?.id, roles: selection })
       toast.success(`Deploying ${name}…`)
       openJob(job_id)
       refresh()
@@ -75,18 +80,18 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
 
         <form className="modal-form" onSubmit={submit}>
           <div className="modal-body">
-          {imported.length === 0 && (
+          {baseImage && !base && (
             <div className="callout callout-warn">
-              <div>No source image is imported yet. Import one before creating instances.</div>
+              <div>No base image is built yet. Build one before creating instances.</div>
               <button
                 type="button"
                 className="btn btn-sm"
                 onClick={() => {
                   onClose()
-                  navigate('/sources')
+                  navigate('/base-image')
                 }}
               >
-                Go to Sources
+                Go to Base image
               </button>
             </div>
           )}
@@ -163,31 +168,20 @@ export function CreateInstanceModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {imported.length > 0 && (
+          {base && (
             <div className="form-field">
-              <span>Source image</span>
-              <div className="size-options">
-                {imported.map((src) => (
-                  <button
-                    type="button"
-                    key={src.id}
-                    className={`size-option ${sourceId === src.id ? 'selected' : ''}`}
-                    onClick={() => setSourceId(src.id)}
-                  >
-                    <span className="size-name">{src.name}</span>
-                    <span className="size-specs">
-                      {src.arch} · template #{src.template_id}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <span>Base image</span>
+              <small className="hint">
+                Clones base image <strong>{baseVersion(base.id)}</strong> (template #
+                {base.template_vmid}, built {relativeTime(base.built_at)}).
+              </small>
             </div>
           )}
 
           <div className="form-field">
             <span>Configure</span>
             <small className="hint">
-              Ansible roles applied after the VM boots. You can change them later from the
+              Roles applied by cloud-init on first boot. You can change them later from the
               instance.
             </small>
             <RoleEditor catalog={roles} value={selection} onChange={setSelection} />

@@ -12,6 +12,7 @@ import { InstanceActions } from '../components/InstanceActions'
 import { ReconfigureModal } from '../components/ReconfigureModal'
 import { useToast } from '../components/Toast'
 import { CopyButton, EmptyState, Field, Mono, Pill } from '../components/ui'
+import { baseVersion } from '../lib/format'
 import { useStore } from '../lib/store'
 import { InstanceServices } from './InstanceServices'
 
@@ -232,11 +233,15 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
                   Reconfigure
                 </button>
               </div>
-              {vm.source_id && (
-                <Field label="Source">
-                  <Mono>{vm.source_id}</Mono>
-                </Field>
-              )}
+              <Field label="Base image">
+                {vm.base_image_id != null ? (
+                  <Mono>{baseVersion(vm.base_image_id)}</Mono>
+                ) : (
+                  <span className="muted" title="Created before versioned base images">
+                    legacy
+                  </span>
+                )}
+              </Field>
               {vm.roles && vm.roles.length > 0 ? (
                 <div className="pkg-list">
                   {vm.roles.map((r) => (
@@ -246,7 +251,7 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
                   ))}
                 </div>
               ) : (
-                <p className="muted small">No Ansible roles recorded for this instance.</p>
+                <p className="muted small">No roles recorded for this instance.</p>
               )}
             </section>
           </div>

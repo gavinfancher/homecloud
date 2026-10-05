@@ -69,7 +69,7 @@ export function InstanceActions({ vm }: { vm: VM }) {
         onClick={() => {
           if (confirm(`Delete ${vm.name}? This permanently destroys the VM.`)) {
             act(async () => {
-              const { job_id } = await api.remove(vm.vmid, vm.name)
+              const { job_id } = await api.remove(vm.vmid)
               openJob(job_id)
             })
           }
