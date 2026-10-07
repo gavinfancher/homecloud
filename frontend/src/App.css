@@ -861,32 +861,6 @@ textarea {
   background: var(--elev);
 }
 
-.port-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.port-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--elev);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: 4px 9px;
-  font-size: 12.5px;
-}
-.port-chip .muted {
-  font-size: 11.5px;
-}
-.port-chip.local {
-  border-style: dashed;
-}
-.port-note {
-  font-size: 11px;
-  color: var(--faint);
-}
-
 .toggle-row {
   display: flex;
   align-items: flex-start;

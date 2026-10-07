@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import type { VM } from '../api'
 import { CreateInstanceModal } from '../components/CreateInstanceModal'
-import { IconChevron, IconInstances, IconPlus, IconScan } from '../components/Icons'
+import { IconChevron, IconInstances, IconPlus } from '../components/Icons'
 import { InstanceActions } from '../components/InstanceActions'
 import { ReconfigureModal } from '../components/ReconfigureModal'
-import { useToast } from '../components/Toast'
 import { CopyButton, EmptyState, Field, Mono, Pill } from '../components/ui'
 import { baseVersion } from '../lib/format'
 import { useStore } from '../lib/store'
@@ -90,23 +89,9 @@ export function Instances() {
 }
 
 function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: () => void }) {
-  const { api, refresh, openJob, roles } = useStore()
-  const toast = useToast()
-  const [busy, setBusy] = useState(false)
+  const { roles } = useStore()
   const [reconfiguring, setReconfiguring] = useState(false)
   const roleLabel = (id: string) => roles.find((r) => r.id === id)?.label ?? id
-
-  async function act(fn: () => Promise<unknown>) {
-    setBusy(true)
-    try {
-      await fn()
-      await refresh()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <div className={`instance ${open ? 'open' : ''}`}>
@@ -173,53 +158,6 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
                   '—'
                 )}
               </Field>
-            </section>
-
-            <section className="detail-block">
-              <div className="block-head">
-                <h4>Ports</h4>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  disabled={busy}
-                  onClick={() =>
-                    act(async () => {
-                      const { job_id } = await api.scanPorts(vm.name)
-                      openJob(job_id)
-                    })
-                  }
-                >
-                  <IconScan width={14} height={14} /> Scan
-                </button>
-              </div>
-              {vm.ports_seen && vm.ports_seen.length > 0 ? (
-                <div className="port-chips">
-                  {vm.ports_seen.map((p) => {
-                    const local = p.publishable === false
-                    return (
-                      <span
-                        className={`port-chip ${local ? 'local' : ''}`}
-                        key={p.port}
-                        title={
-                          local
-                            ? p.not_publishable_reason ||
-                              `Listens on ${p.address ?? 'loopback'} only; not reachable over the tailnet`
-                            : p.address
-                              ? `Listening on ${p.address}`
-                              : undefined
-                        }
-                      >
-                        <strong>{p.port}</strong>
-                        {p.proc && <span className="muted">{p.proc}</span>}
-                        {local && <span className="port-note">loopback only</span>}
-                      </span>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="muted small">
-                  No ports scanned yet. Run a scan to discover listening services.
-                </p>
-              )}
             </section>
 
             <section className="detail-block">
