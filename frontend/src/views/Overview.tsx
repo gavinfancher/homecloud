@@ -4,7 +4,8 @@ import type { Job } from '../api'
 import { IconActivity, IconImages, IconInstances, IconPlay, IconStop } from '../components/Icons'
 import { InstanceActions } from '../components/InstanceActions'
 import { Pill } from '../components/ui'
-import { relativeTime, titleCase } from '../lib/format'
+import { relativeTime } from '../lib/format'
+import { absoluteTime, duration, jobDetails, jobHeadline, jobKind } from '../lib/jobs'
 import { useStore } from '../lib/store'
 
 export function Overview() {
@@ -138,17 +139,35 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
 
 function ActivityRow({ job }: { job: Job }) {
   const { openJob } = useStore()
+  const active = job.status === 'pending' || job.status === 'in_progress'
+  const failed = job.status === 'failed'
+  // A running or failed job is best described by where it got to; a finished one by what it made.
+  const sub = active || failed ? jobHeadline(job) : jobDetails(job) || jobHeadline(job)
+  const when = job.finished_at || job.started_at || job.created_at
   return (
     <li className="activity-row" onClick={() => openJob(job.id)}>
       <Pill status={job.status} />
       <div className="activity-main">
         <span className="activity-title">
-          {titleCase(job.type)} · <strong>{job.label}</strong>
+          {jobKind(job.type)} · <strong>{job.label}</strong>
         </span>
+        {sub && (
+          <span className={`activity-sub ${failed ? 'activity-sub-error' : ''}`} title={sub}>
+            {sub}
+          </span>
+        )}
       </div>
-      <span className="muted activity-time">
-        {relativeTime(job.finished_at || job.started_at || job.created_at)}
-      </span>
+      <div className="activity-meta">
+        <span className="muted activity-time" title={absoluteTime(when)}>
+          {relativeTime(when)}
+        </span>
+        {job.started_at && (
+          <span className="faint activity-dur">
+            {active ? 'running ' : ''}
+            {duration(job.started_at, job.finished_at)}
+          </span>
+        )}
+      </div>
     </li>
   )
 }

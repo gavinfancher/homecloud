@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { Job, VM } from '../api'
+import type { Job } from '../api'
 import { IconActivity } from '../components/Icons'
-import { InstanceActions } from '../components/InstanceActions'
 import { EmptyState, Pill, Spinner } from '../components/ui'
-import { relativeTime, titleCase } from '../lib/format'
+import { relativeTime } from '../lib/format'
+import { absoluteTime, duration, jobDetails, jobHeadline, jobKind, logLevel } from '../lib/jobs'
 import { useStore } from '../lib/store'
 
-const INSTANCE_JOB_TYPES = new Set(['deploy_vm', 'delete_vm', 'scan_ports', 'provision_vm'])
-
 export function Activity() {
-  const { api, openJob, vms } = useStore()
+  const { api, openJob } = useStore()
   const [jobs, setJobs] = useState<Job[] | null>(null)
 
   const load = useCallback(() => {
@@ -54,17 +52,16 @@ export function Activity() {
           <thead>
             <tr>
               <th>Status</th>
-              <th>Type</th>
-              <th>Target</th>
+              <th>Job</th>
+              <th>Details</th>
               <th>Started</th>
-              <th>Finished</th>
-              <th>Actions</th>
-              <th />
+              <th>Duration</th>
+              <th className="job-logs">Log</th>
             </tr>
           </thead>
           <tbody>
             {jobs.map((j) => (
-              <ActivityJobRow key={j.id} job={j} vms={vms} onOpen={() => openJob(j.id)} />
+              <ActivityJobRow key={j.id} job={j} onOpen={() => openJob(j.id)} />
             ))}
           </tbody>
         </table>
@@ -73,33 +70,43 @@ export function Activity() {
   )
 }
 
-function ActivityJobRow({
-  job,
-  vms,
-  onOpen,
-}: {
-  job: Job
-  vms: VM[]
-  onOpen: () => void
-}) {
-  const vm =
-    INSTANCE_JOB_TYPES.has(job.type) ? vms.find((v) => v.name === job.label) : undefined
-  const deleting =
-    job.type === 'delete_vm' && (job.status === 'pending' || job.status === 'in_progress')
+function ActivityJobRow({ job, onOpen }: { job: Job; onOpen: () => void }) {
+  const active = job.status === 'pending' || job.status === 'in_progress'
+  const failed = job.status === 'failed'
+  const details = jobDetails(job)
+  const headline = jobHeadline(job)
+  const warnings = job.logs.filter((l) => logLevel(l.level) === 'warn').length
+  const errors = job.logs.filter((l) => logLevel(l.level) === 'error').length + (job.error ? 1 : 0)
+  const started = job.started_at || job.created_at
 
   return (
     <tr className="job-row" onClick={onOpen}>
       <td>
         <Pill status={job.status} />
       </td>
-      <td>{titleCase(job.type)}</td>
-      <td className="job-target">{job.label}</td>
-      <td className="muted">{relativeTime(job.started_at || job.created_at)}</td>
-      <td className="muted">{job.finished_at ? relativeTime(job.finished_at) : '—'}</td>
-      <td className="job-actions" onClick={(e) => e.stopPropagation()}>
-        {vm && !deleting ? <InstanceActions vm={vm} /> : <span className="muted">—</span>}
+      <td className="job-name">
+        <span className="job-kind">{jobKind(job.type)}</span>
+        <span className="job-target">{job.label}</span>
       </td>
-      <td className="muted job-logs">{job.logs.length} log{job.logs.length === 1 ? '' : 's'}</td>
+      <td className="job-details">
+        {details && <span className="job-detail-line">{details}</span>}
+        {headline && (active || failed || !details) && (
+          <span className={`job-headline ${failed ? 'job-headline-error' : ''}`} title={headline}>
+            {headline}
+          </span>
+        )}
+      </td>
+      <td className="muted nowrap" title={absoluteTime(started)}>
+        {relativeTime(started)}
+      </td>
+      <td className="muted nowrap" title={job.finished_at ? `Finished ${absoluteTime(job.finished_at)}` : undefined}>
+        {job.started_at ? duration(job.started_at, job.finished_at) : '—'}
+      </td>
+      <td className="job-logs">
+        <span className="muted">{job.logs.length} lines</span>
+        {warnings > 0 && <span className="log-count log-count-warn">{warnings} warn</span>}
+        {errors > 0 && <span className="log-count log-count-error">{errors} err</span>}
+      </td>
     </tr>
   )
 }
