@@ -220,12 +220,6 @@ function InstanceRow({ vm, open, onToggle }: { vm: VM; open: boolean; onToggle: 
                   No ports scanned yet. Run a scan to discover listening services.
                 </p>
               )}
-              {vm.hostname && (
-                <p className="hint ports-hint">
-                  Reachable over the tailnet at <code>{vm.hostname}:&lt;port&gt;</code>;{' '}
-                  <code>*.{vm.hostname}</code> resolves here too.
-                </p>
-              )}
             </section>
 
             <section className="detail-block">
