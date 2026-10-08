@@ -164,4 +164,4 @@ Issues:
 
 ## DNS — as built (2026-10-05)
 
-Instances are `<vm>.vm.gavinf.com` (+ `*.<vm>.vm.gavinf.com`), served by CoreDNS on the control VM through Tailscale split DNS (`vm.gavinf.com → 100.74.161.39`). `vm.dns.gavinf.com` and `vm.homecloud.gavinf.com` are still served from the same records (`DNS_LEGACY_DOMAINS`) until clients move; then drop them from Infisical, the Corefile and the tailnet's split-DNS list. Don't create public records under `vm.gavinf.com`.
+Instances are `<vm>.vm.gavinf.com` (+ `*.<vm>.vm.gavinf.com`), served by CoreDNS on the control VM through Tailscale split DNS (`vm.gavinf.com → 100.74.161.39`). The old `vm.dns.gavinf.com` and `vm.homecloud.gavinf.com` zones were dropped on 2026-10-07; `DNS_LEGACY_DOMAINS` is still supported if a rename ever needs another overlap period. Don't create public records under `vm.gavinf.com`.
