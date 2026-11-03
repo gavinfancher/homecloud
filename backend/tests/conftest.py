@@ -61,7 +61,7 @@ class FakePve:
         return vmid
 
     def upload_iso(self, filename, data):
-        volid = f"local:iso/{filename}"
+        volid = f"{config.PROXMOX_FILE_STORAGE}:iso/{filename}"
         self.isos.add(volid)
         return volid
 

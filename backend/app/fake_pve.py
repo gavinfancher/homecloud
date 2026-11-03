@@ -9,6 +9,8 @@ import itertools
 import threading
 import time
 
+from app import config
+
 TAG = "homecloud"
 BOOT_SECONDS = {"ubuntu": 10, "windows": 30}
 
@@ -42,7 +44,7 @@ def free_vmid(start: int, also_taken: set[int]) -> int:
 
 
 def upload_iso(filename: str, data: bytes) -> str:
-    return f"local:iso/{filename}"
+    return f"{config.PROXMOX_FILE_STORAGE}:iso/{filename}"
 
 
 def delete_volume(volid: str) -> None:

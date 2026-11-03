@@ -11,7 +11,7 @@ def test_ubuntu_goes_to_ready(anon, fake_pve):
     provision.tick({})  # create
     vm = db.get_vm("web1")
     assert vm["vmid"] == 700 and vm["step"] == "start"
-    assert fake_pve.isos == {"local:iso/homecloud-700-seed.iso"}
+    assert fake_pve.isos == {"homecloud:iso/homecloud-700-seed.iso"}
 
     provision.tick({})  # start
     provision.tick({})  # wait: no IP yet
