@@ -24,7 +24,7 @@ def anon():
     """Someone who hasn't signed in. (No `with`, so the worker thread doesn't start.)"""
     db.init_schema()
     with db.conn() as c:
-        c.execute("TRUNCATE vms, sessions")
+        c.execute("TRUNCATE vm_events, vms, sessions")
     auth._failures.clear()
     return TestClient(main.app)
 
@@ -68,7 +68,13 @@ class FakePve:
     def delete_volume(self, volid):
         self.isos.discard(volid)
 
-    def create_ubuntu(self, vmid, name, cores, memory_mb, disk_gb, seed):
+    def ubuntu_image(self, progress=None):
+        return "local:import/ubuntu.qcow2"
+
+    def virtio_iso(self, progress=None):
+        return "local:iso/virtio.iso"
+
+    def create_ubuntu(self, vmid, name, cores, memory_mb, disk_gb, seed, image, *rest):
         # Like Proxmox: created in the pool, untagged; finish() tags it.
         self.vms[vmid] = {"name": name, "status": "stopped", "tags": "", "pool": "homecloud",
                           "cds": {"ide2": seed}}

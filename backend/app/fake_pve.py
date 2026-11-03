@@ -57,11 +57,19 @@ def _create(os: str, vmid: int, name: str) -> None:
         _vms[vmid] = {"name": name, "os": os, "status": "stopped", "started": 0, "ip": None}
 
 
-def create_ubuntu(vmid, name, cores, memory_mb, disk_gb, seed):
+def ubuntu_image(progress=None) -> str:
+    return "local:import/fake-ubuntu.qcow2"
+
+
+def virtio_iso(progress=None) -> str:
+    return "local:iso/fake-virtio.iso"
+
+
+def create_ubuntu(vmid, name, cores, memory_mb, disk_gb, seed, image):
     _create("ubuntu", vmid, name)
 
 
-def create_windows(vmid, name, cores, memory_mb, disk_gb, answer):
+def create_windows(vmid, name, cores, memory_mb, disk_gb, answer, virtio):
     _create("windows", vmid, name)
 
 

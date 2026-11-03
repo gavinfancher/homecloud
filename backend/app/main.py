@@ -149,6 +149,7 @@ def _view(vm: dict, live: dict | None) -> dict:
         "vmid": vm["vmid"], "state": vm["state"], "step": vm["step"], "error": vm["error"],
         "ip": vm["ip"], "power": power, "uptime": (live or {}).get("uptime", 0),
         "created_at": vm["created_at"].isoformat(),
+        "last_event": vm.get("last_event"), "last_level": vm.get("last_level"),
     }
 
 
@@ -194,6 +195,8 @@ def create_vm(body: NewVM):
         db.add_vm(name, body.os, body.cores, body.memory_gb * 1024, body.disk_gb)
     except db.Exists:
         raise HTTPException(409, f"There's already a VM called {name}") from None
+    db.add_event(name, f"Asked for: {spec['label']}, {body.cores} vCPU, {body.memory_gb} GB memory, "
+                       f"{body.disk_gb} GB disk")
     return _view(db.get_vm(name), None)
 
 
@@ -206,16 +209,25 @@ def _ready_vm(name: str) -> dict:
     return vm
 
 
+def _power(name: str, verb: str, fn) -> dict:
+    vm = _ready_vm(name)
+    try:
+        fn(vm["vmid"])
+    except Exception as e:
+        db.add_event(name, f"{verb} failed: {e}", "error")
+        raise HTTPException(502, f"{verb} failed: {e}") from None
+    db.add_event(name, f"{verb}: done")
+    return {"ok": True}
+
+
 @app.post("/api/vms/{name}/start")
 def start_vm(name: str):
-    pve.start(_ready_vm(name)["vmid"])
-    return {"ok": True}
+    return _power(name, "Start", pve.start)
 
 
 @app.post("/api/vms/{name}/shutdown")
 def shutdown_vm(name: str):
-    pve.shutdown(_ready_vm(name)["vmid"])
-    return {"ok": True}
+    return _power(name, "Shut down", pve.shutdown)
 
 
 @app.delete("/api/vms/{name}", status_code=202)
@@ -224,7 +236,17 @@ def delete_vm(name: str):
     if not db.get_vm(name):
         raise HTTPException(404, "No such VM")
     db.update_vm(name, state="deleting", error=None)
+    db.add_event(name, "Delete asked for")
     return {"ok": True}
+
+
+@app.get("/api/vms/{name}/events")
+def vm_events(name: str, after: int = 0):
+    """The VM's log, oldest first. With *after* (the last id you have), only what's new."""
+    if not db.get_vm(name):
+        raise HTTPException(404, "No such VM")
+    return {"events": [{"id": e["id"], "at": e["at"].isoformat(), "level": e["level"], "message": e["message"]}
+                       for e in db.events(name, after)]}
 
 
 # ---------- local dev: serve the pages too ----------

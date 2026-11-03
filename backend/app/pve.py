@@ -9,6 +9,7 @@ import io
 import ipaddress
 import re
 import time
+from collections.abc import Callable
 from functools import cache
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlparse
@@ -25,7 +26,11 @@ _CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
 
 class PveError(Exception):
-    pass
+    """A Proxmox call or task that failed. *log* is the tail of the task's own log, if any."""
+
+    def __init__(self, message: str, log: list[str] | None = None):
+        super().__init__(message)
+        self.log = log or []
 
 
 @cache
@@ -44,16 +49,37 @@ def qemu(vmid: int):
     return node().qemu(vmid)
 
 
-def wait_task(upid: str, timeout: int = 600) -> None:
+def task_log(upid: str, start: int = 0) -> list[str]:
+    """Lines of a task's log from line *start* on."""
+    try:
+        return [line.get("t", "") for line in node().tasks(upid).log.get(start=start, limit=5000)]
+    except Exception:
+        return []
+
+
+def wait_task(upid: str, timeout: int = 600, progress: Callable[[str], None] | None = None,
+              every: int = 30) -> None:
+    """Wait for a Proxmox task. With *progress*, pass it the task's latest log line about every
+    *every* seconds (download-url prints how far it's got). A failed task raises PveError with the
+    end of its log, which usually says why."""
     deadline = time.monotonic() + timeout
+    seen, last_report, last_line = 0, time.monotonic(), ""
     while time.monotonic() < deadline:
         status = node().tasks(upid).status.get()
         if status.get("status") == "stopped":
             if status.get("exitstatus") != "OK":
-                raise PveError(f"Proxmox task failed: {status.get('exitstatus')}")
+                raise PveError(f"Proxmox task failed: {status.get('exitstatus')}", log=task_log(upid)[-15:])
             return
+        if progress and time.monotonic() - last_report >= every:
+            lines = task_log(upid, start=seen)
+            seen += len(lines)
+            latest = next((line.strip() for line in reversed(lines) if line.strip()), "")
+            if latest and latest != last_line:
+                progress(latest)
+                last_line = latest
+            last_report = time.monotonic()
         time.sleep(2)
-    raise PveError(f"Proxmox task still running after {timeout}s: {upid}")
+    raise PveError(f"Proxmox task still running after {timeout}s: {upid}", log=task_log(upid)[-15:])
 
 
 # ---------- reading ----------
@@ -136,7 +162,8 @@ def upload_iso(filename: str, data: bytes) -> str:
     return volid
 
 
-def download(url: str, content: str, filename: str, sha256: str | None = None) -> str:
+def download(url: str, content: str, filename: str, sha256: str | None = None,
+             progress: Callable[[str], None] | None = None) -> str:
     """Have the node fetch *url* into its file storage, once. Returns the volume id.
 
     Proxmox checks the checksum itself and throws the file away if it doesn't match.
@@ -147,11 +174,13 @@ def download(url: str, content: str, filename: str, sha256: str | None = None) -
     params = {"content": content, "filename": filename, "url": url}
     if sha256:
         params |= {"checksum": sha256, "checksum-algorithm": "sha256"}
-    wait_task(_storage()("download-url").post(**params), timeout=3600)
+    if progress:
+        progress(f"Downloading {filename} to {config.PROXMOX_FILE_STORAGE} (first time only) from {url}")
+    wait_task(_storage()("download-url").post(**params), timeout=3600, progress=progress)
     return volid
 
 
-def ubuntu_image() -> str:
+def ubuntu_image(progress: Callable[[str], None] | None = None) -> str:
     """The pinned Ubuntu cloud image, downloaded on first use. Returns its volume id."""
     url = config.UBUNTU_IMAGE_URL
     path = PurePosixPath(urlparse(url).path)
@@ -165,19 +194,19 @@ def ubuntu_image() -> str:
     for line in sums.text.splitlines():
         digest, _, name = line.partition(" ")
         if name.lstrip(" *") == path.name:
-            return download(url, "import", filename, digest.lower())
+            return download(url, "import", filename, digest.lower(), progress)
     raise PveError(f"{path.name} isn't listed in its SHA256SUMS")
 
 
-def virtio_iso() -> str:
-    return download(config.VIRTIO_ISO_URL, "iso", PurePosixPath(urlparse(config.VIRTIO_ISO_URL).path).name)
+def virtio_iso(progress: Callable[[str], None] | None = None) -> str:
+    return download(config.VIRTIO_ISO_URL, "iso", PurePosixPath(urlparse(config.VIRTIO_ISO_URL).path).name,
+                    progress=progress)
 
 
 # ---------- creating ----------
 
-def create_ubuntu(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: int, seed: str) -> None:
-    """A VM whose disk is the cloud image, with the seed ISO in its CD drive."""
-    image = ubuntu_image()
+def create_ubuntu(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: int, seed: str, image: str) -> None:
+    """A VM whose disk is the cloud *image*, with the *seed* ISO in its CD drive."""
     disk = config.PROXMOX_DISK_STORAGE
     wait_task(node().qemu.post(
         vmid=vmid, name=name, pool=config.PROXMOX_POOL, ostype="l26", machine="q35", cpu="host",
@@ -189,12 +218,12 @@ def create_ubuntu(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: int
     ), timeout=900)
 
 
-def create_windows(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: int, answer: str) -> None:
+def create_windows(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: int, answer: str,
+                   virtio: str) -> None:
     """Windows 11 wants UEFI with Secure Boot, a TPM 2.0 and q35. SATA disk and an Intel NIC,
     so Setup has drivers for both without any extra disc. The answer file and the VirtIO tools
     go in the other CD drives."""
     disk = config.PROXMOX_DISK_STORAGE
-    virtio = virtio_iso()
     wait_task(node().qemu.post(
         vmid=vmid, name=name, pool=config.PROXMOX_POOL, ostype="win11", machine="q35", bios="ovmf", cpu="host",
         cores=cores, memory=memory_mb, agent="enabled=1",

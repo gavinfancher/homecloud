@@ -1,4 +1,5 @@
 from app import db, provision
+from app.pve import PveError
 
 
 def run_until_settled(fake_pve, ticks=10):
@@ -104,3 +105,41 @@ def test_failure_is_recorded(anon, fake_pve, monkeypatch):
     provision.tick({})
     vm = db.get_vm("web1")
     assert vm["state"] == "failed" and "no space left" in vm["error"]
+
+
+def test_log_tells_the_story(anon, fake_pve):
+    db.add_vm("web1", "ubuntu", 2, 4096, 40)
+    for _ in range(3):
+        provision.tick({})  # create, start, wait (no IP yet)
+    fake_pve.agent_ip = "10.0.4.77"
+    provision.tick({})  # wait: IP
+    provision.tick({})  # cleanup
+    text = "\n".join(e["message"] for e in db.events("web1"))
+    for expected in ("Reserved VM ID 700", "Creating VM 700", "Powering on", "Waiting for the guest agent",
+                     "Guest agent reports 10.0.4.77", "Ejecting", "Ready"):
+        assert expected in text
+    assert db.list_vms()[0]["last_event"].startswith("Ready")
+
+
+def test_failed_task_log_is_kept(anon, fake_pve):
+    """When a Proxmox task fails, the end of its own log (usually the real reason) is saved too."""
+    def broken(*args):
+        raise PveError("Proxmox task failed: unable to create VM 700", log=["line 1", "TASK ERROR: no space"])
+
+    fake_pve.create_ubuntu = broken
+    db.add_vm("web1", "ubuntu", 2, 4096, 40)
+    provision.tick({})
+    events = db.events("web1")
+    assert db.get_vm("web1")["state"] == "failed"
+    assert events[-2]["level"] == "error" and "unable to create VM 700" in events[-2]["message"]
+    assert "TASK ERROR: no space" in events[-1]["message"]
+
+
+def test_failed_delete_logged_once(anon, fake_pve):
+    db.add_vm("web1", "ubuntu", 2, 4096, 40)
+    provision.tick({})
+    fake_pve.destroy = lambda vmid: (_ for _ in ()).throw(RuntimeError("403 Forbidden"))
+    db.update_vm("web1", state="deleting")
+    for _ in range(3):
+        provision.tick({})
+    assert sum("Delete failed" in e["message"] for e in db.events("web1")) == 1

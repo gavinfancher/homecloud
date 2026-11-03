@@ -1,10 +1,13 @@
-"""Postgres: the VMs homecloud made, and sign-in sessions. Nothing else is kept.
+"""Postgres: the VMs homecloud made, each one's log, and sign-in sessions.
 
 A VM's row is the source of truth for what homecloud is doing with it:
 
   state      creating -> ready, or failed; deleting until the row is removed
   step       within creating: which step comes next (see provision.py)
   vmid       reserved before the VM is created, so a restart mid-create finds it again
+
+A VM's log (vm_events) is what the worker did and when, for the Log panel in the UI. It goes
+when the VM's row goes.
 
 Live facts (running or stopped, uptime) are always read from Proxmox, never stored.
 """
@@ -33,6 +36,15 @@ CREATE TABLE IF NOT EXISTS vms (
     error        text,
     created_at   timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS vm_events (
+    id      bigserial PRIMARY KEY,
+    vm      text NOT NULL REFERENCES vms (name) ON DELETE CASCADE,
+    at      timestamptz NOT NULL DEFAULT now(),
+    level   text NOT NULL DEFAULT 'info' CHECK (level IN ('info', 'warn', 'error')),
+    message text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS vm_events_vm_id ON vm_events (vm, id);
 
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash text PRIMARY KEY,
@@ -73,8 +85,13 @@ class Exists(Exception):
 
 
 def list_vms() -> list[dict]:
+    """Every VM, each with its latest log line (last_event, last_level)."""
+    fields = ", ".join(f"v.{f.strip()}" for f in VM_FIELDS.split(","))
     with conn() as c:
-        return c.execute(f"SELECT {VM_FIELDS} FROM vms ORDER BY created_at").fetchall()
+        return c.execute(
+            f"SELECT {fields}, e.message AS last_event, e.level AS last_level FROM vms v "
+            "LEFT JOIN LATERAL (SELECT message, level FROM vm_events WHERE vm = v.name "
+            "ORDER BY id DESC LIMIT 1) e ON true ORDER BY v.created_at").fetchall()
 
 
 def get_vm(name: str) -> dict | None:
@@ -119,3 +136,19 @@ def vms_in(*states: str) -> list[dict]:
 def used_vmids() -> set[int]:
     with conn() as c:
         return {r["vmid"] for r in c.execute("SELECT vmid FROM vms WHERE vmid IS NOT NULL")}
+
+
+# ---------- the log ----------
+
+def add_event(name: str, message: str, level: str = "info") -> None:
+    """Append to a VM's log. Quietly does nothing if the VM's row is already gone."""
+    with conn() as c:
+        c.execute("INSERT INTO vm_events (vm, level, message) SELECT name, %s, %s FROM vms WHERE name = %s",
+                  (level, message, name))
+
+
+def events(name: str, after: int = 0, limit: int = 500) -> list[dict]:
+    """A VM's log, oldest first: the newest *limit* entries with an id above *after*."""
+    with conn() as c:
+        return c.execute("SELECT id, at, level, message FROM (SELECT * FROM vm_events WHERE vm = %s AND id > %s "
+                         "ORDER BY id DESC LIMIT %s) e ORDER BY id", (name, after, limit)).fetchall()

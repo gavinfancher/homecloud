@@ -61,3 +61,14 @@ def test_delete_marks_for_worker(client, fake_pve):
 def test_power_only_when_ready(client, fake_pve):
     client.post("/api/vms", json=UBUNTU)
     assert client.post("/api/vms/web1/start").status_code == 409
+
+
+def test_events_endpoint(client, fake_pve):
+    client.post("/api/vms", json={"name": "web1", "os": "ubuntu", "cores": 1, "memory_gb": 2, "disk_gb": 20})
+    r = client.get("/api/vms/web1/events")
+    assert r.status_code == 200
+    first = r.json()["events"]
+    assert first[0]["message"].startswith("Asked for: Ubuntu 26.04")
+    assert client.get(f"/api/vms/web1/events?after={first[-1]['id']}").json()["events"] == []
+    assert client.get("/api/vms/nope/events").status_code == 404
+    assert client.get("/api/vms").json()["vms"][0]["last_event"].startswith("Asked for")

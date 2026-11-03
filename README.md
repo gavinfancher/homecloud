@@ -33,6 +33,11 @@ its steps, checking every few seconds:
 | **wait** | Until the guest agent reports a LAN IP (a minute or two). | Windows installs itself, signs in once, installs the VirtIO guest tools; then the agent reports its IP (20–40 minutes). |
 | **cleanup** | Eject the seed ISO and delete it. | Eject the discs and delete the answer ISO, which holds the admin password. |
 
+Every step lands in the VM's log, stored in Postgres and opened with **Log** in the UI. It records
+what the worker is doing, how long each piece took, and, when a Proxmox task fails, the end of
+Proxmox's own task log, which is usually where the real reason is. While a VM is busy, its latest
+log line shows under its status.
+
 Then it's **ready**: `ssh ubuntu@<ip>` with my key (no passwords), or RDP to `<ip>` as
 `Administrator`.
 

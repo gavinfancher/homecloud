@@ -93,12 +93,52 @@ function ipLine(vm) {
     el('span', { class: 'vm-connect' }, how));
 }
 
-// Straight to the VM's console in the Proxmox UI (noVNC; xterm.js for Ubuntu, whose cloud
-// image talks on the serial port). Proxmox asks you to sign in the first time.
-function consoleUrl(vm) {
-  const q = new URLSearchParams({ console: 'kvm', vmid: vm.vmid, vmname: vm.name, node: cfg.proxmox_node,
-    resize: 'off', cmd: '', ...(vm.os === 'ubuntu' ? { xtermjs: 1 } : { novnc: 1 }) });
-  return `${cfg.proxmox_ui}/?${q}`;
+// The VM's page in the Proxmox UI (Summary, with Console, Hardware and the rest one click away).
+// The hash is Proxmox's own "which resource is selected" state. Proxmox asks you to sign in first.
+function proxmoxUrl(vm) {
+  return `${cfg.proxmox_ui}/#v1:0:=qemu%2F${vm.vmid}:4:::::::`;
+}
+
+// ---------- each VM's log ----------
+
+// Open log panels, by VM name. A panel stays open across refreshes and only fetches what's new.
+const logs = new Map();
+
+function logLine(e) {
+  const t = new Date(e.at);
+  return el('div', { class: 'log-line ' + e.level },
+    el('time', { datetime: e.at, title: t.toLocaleString() }, t.toLocaleTimeString([], { hour12: false })),
+    el('span', { class: 'log-msg' }, e.message));
+}
+
+function logText(l) {
+  return l.lines.map(e => `${e.at}  ${e.level.toUpperCase().padEnd(5)}  ${e.message}`).join('\n');
+}
+
+function openLog(name) {
+  const body = el('div', { class: 'log-body', role: 'log' }, el('div', { class: 'log-empty' }, 'Loading…'));
+  const l = { after: 0, lines: [], body, scroll: null };
+  const copy = el('button', { class: 'btn small', type: 'button', onclick: async e => {
+    await copyText(`homecloud log for ${name}\n` + logText(l));
+    e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy log'; }, 1500);
+  } }, 'Copy log');
+  l.panel = el('div', { class: 'vm-log' },
+    el('div', { class: 'log-head' }, el('span', { class: 'label' }, 'Log'), copy), body);
+  logs.set(name, l);
+}
+
+async function loadLog(name) {
+  const l = logs.get(name);
+  const { events } = await auth.api(`/api/vms/${encodeURIComponent(name)}/events?after=${l.after}`);
+  if (!events.length) {
+    if (!l.lines.length) l.body.replaceChildren(el('div', { class: 'log-empty' }, 'Nothing logged yet.'));
+    return;
+  }
+  const b = l.body, atBottom = !l.lines.length || b.scrollHeight - b.scrollTop - b.clientHeight < 24;
+  if (!l.lines.length) b.replaceChildren();
+  for (const e of events) { l.lines.push(e); b.append(logLine(e)); }
+  l.after = events[events.length - 1].id;
+  if (atBottom) b.scrollTop = b.scrollHeight;  // follow along, unless you've scrolled up to read
 }
 
 // ---------- the list ----------
@@ -124,9 +164,14 @@ function vmRow(vm) {
   }
   if (vm.vmid && cfg) {
     // Only opens from the LAN or tailnet, where the Proxmox UI is.
-    actions.push(el('a', { class: 'btn small', target: '_blank', rel: 'noopener', href: consoleUrl(vm),
-      title: `Proxmox console for VM ${vm.vmid}` }, 'Console ↗'));
+    actions.push(el('a', { class: 'btn small', target: '_blank', rel: 'noopener', href: proxmoxUrl(vm),
+      title: `VM ${vm.vmid} in the Proxmox UI` }, 'Proxmox ↗'));
   }
+  const open = logs.has(vm.name);
+  actions.push(el('button', { class: 'btn small', type: 'button', 'aria-expanded': String(open), onclick: () => {
+    if (open) logs.delete(vm.name); else openLog(vm.name);
+    refresh();
+  } }, open ? 'Hide log' : 'Log'));
   if (vm.state !== 'deleting') {
     actions.push(el('button', { class: 'btn small danger', type: 'button', onclick: e => {
       if (confirm(`Delete ${vm.name}? Its disk is deleted too. This can't be undone.`)) {
@@ -145,6 +190,9 @@ function vmRow(vm) {
     el('div', {},
       el('div', { class: 'vm-status' }, el('span', { class: 'dot ' + dot }), text),
       vm.error && el('div', { class: 'vm-error' }, vm.error),
+      // While it's working, the latest thing the worker did.
+      !vm.error && vm.last_event && (vm.state === 'creating' || vm.state === 'deleting') &&
+        el('div', { class: 'vm-last', title: vm.last_event }, vm.last_event),
     ),
     el('div', { class: 'vm-actions' }, actions),
   );
@@ -158,10 +206,15 @@ async function refresh() {
     const data = await auth.api('/api/vms');
     $('pve-down').hidden = data.proxmox;
     const list = $('vms');
+    const names = new Set(data.vms.map(v => v.name));
+    for (const name of logs.keys()) if (!names.has(name)) logs.delete(name);  // VM's gone
+    for (const l of logs.values()) l.scroll = l.body.scrollTop;  // re-adding a node resets it
     list.replaceChildren(...(data.vms.length
-      ? data.vms.map(vmRow)
+      ? data.vms.flatMap(vm => logs.has(vm.name) ? [vmRow(vm), logs.get(vm.name).panel] : [vmRow(vm)])
       : [el('div', { class: 'empty' }, 'No VMs yet. Make one with New VM.')]));
+    for (const l of logs.values()) if (l.scroll != null) l.body.scrollTop = l.scroll;
     busy = data.vms.some(v => v.state === 'creating' || v.state === 'deleting');
+    await Promise.all([...logs.keys()].map(name => loadLog(name).catch(() => {})));
   } catch (e) {
     $('vms').replaceChildren(el('div', { class: 'empty' }, 'Couldn’t load VMs: ' + e.message));
   }
