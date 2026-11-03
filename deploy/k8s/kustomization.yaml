@@ -18,4 +18,4 @@ resources:
 # .github/workflows/ci.yml sets newTag to the commit's short SHA and pushes.
 images:
   - name: ghcr.io/gavinfancher/homecloud
-    newTag: 1417775
+    newTag: "1417775"
