@@ -144,9 +144,9 @@ them into the `homecloud` Secret and restarts the pods when one changes.
    pulls it without credentials.
 6. **Cluster**: `kubectl apply -f deploy/argocd/homecloud.yaml`, wait for both pods, then
    `curl https://homecloud-api.gavinf.com/readyz`.
-7. **Pages**: Workers & Pages → `gavinf-homecloud` → Settings → Builds → connect
+7. **Pages**: Workers & Pages → `homecloud` → Settings → Builds → connect
    `gavinfancher/homecloud`, root directory `frontend`, build `npm run build`, deploy
-   `npx wrangler deploy`. Same Worker name as the old console, so it replaces it in place.
+   `npx wrangler deploy`. The Worker's name must match `name` in `frontend/wrangler.jsonc`.
 
 ## Local dev
 

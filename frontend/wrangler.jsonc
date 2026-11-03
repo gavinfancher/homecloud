@@ -1,10 +1,9 @@
 // homecloud.gavinf.com: the pages, CSS and JS as static assets on Cloudflare. No Worker code:
 // the pages call the API at homecloud-api.gavinf.com directly. Built by `npm run build`,
-// deployed by Workers Builds (root directory: frontend). Same name as the old React console's
-// Worker, so the first deploy replaces it in place.
+// deployed by Workers Builds (root directory: frontend) to the Worker named homecloud.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "gavinf-homecloud",
+  "name": "homecloud",
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
   "routes": [{ "pattern": "homecloud.gavinf.com", "custom_domain": true }],
