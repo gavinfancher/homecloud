@@ -2,29 +2,22 @@
 .env
 *.local
 
-# SSH: keys and the real config are runtime-only; ssh/config.example is
-# tracked. Never commit private keys or real hostnames.
-ssh/*-key
-ssh/*-key.pub
-ssh/config
-
 # Python
 .venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
-*.py[cod]
-.homecloud/
 
-# Tooling caches
-.wrangler/
-
-# Web apps (Vite build artifacts; source is committed)
+# Frontend
 frontend/node_modules/
 frontend/dist/
-frontend/.wrangler/
+.wrangler/
 
-# Agent tooling artifacts (not project code)
-.agents/
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/terraform.tfvars
+infra/terraform/backend.hcl
+
+# Agent tooling
 .claude/
-skills-lock.json

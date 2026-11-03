@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · homecloud</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="/">
+      <span class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.34 9.5 4 4 0 0 0 7 19z" stroke="#3fd79a" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      homecloud
+    </a>
+    <span class="spacer"></span>
+    <a class="header-link" href="https://dash.gavinf.com">Dashboard</a>
+  </header>
+  <div class="login-wrap">
+    <form class="login panel" id="login">
+      <h1>Sign in</h1>
+      <p>homecloud makes VMs on Proxmox.</p>
+      <!-- For password managers: there's one account. -->
+      <input type="text" name="username" value="admin" autocomplete="username" hidden>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+      </div>
+      <div class="error-text" id="error" hidden></div>
+      <button class="btn primary" type="submit" id="submit">Sign in</button>
+    </form>
+  </div>
+  <script src="/static/config.js"></script>
+  <script src="/static/auth.js"></script>
+  <script>
+    const form = document.getElementById('login'), error = document.getElementById('error');
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      form.submit.disabled = true;
+      const problem = await auth.signIn(form.password.value);
+      form.submit.disabled = false;
+      if (!problem) return location.replace('/');
+      error.textContent = problem; error.hidden = false;
+      form.password.select();
+    });
+  </script>
+</body>
+</html>

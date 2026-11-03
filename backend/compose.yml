@@ -1,0 +1,37 @@
+# Local dev: the API with its own Postgres, serving the pages from ../frontend/static, with no
+# sign-in (HOMECLOUD_LOCAL=1), so it only listens on this machine. It talks to the real
+# Proxmox, so it needs the Proxmox settings: `infisical run --env=dev -- docker compose up`.
+services:
+  postgres:
+    image: postgres:18.4
+    environment:
+      POSTGRES_USER: homecloud
+      POSTGRES_PASSWORD: homecloud
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "homecloud"]
+      interval: 2s
+      retries: 15
+
+  homecloud:
+    build: .
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:${HOMECLOUD_PORT:-8000}:8000"
+    environment:
+      HOMECLOUD_LOCAL: "1"
+      HOMECLOUD_DATABASE_URL: postgresql://homecloud:homecloud@postgres/homecloud
+      HOMECLOUD_STATIC_DIR: /frontend/static
+      # Passed through from your shell (or Infisical dev):
+      HOMECLOUD_PROXMOX_HOST:
+      HOMECLOUD_PROXMOX_TOKEN_ID:
+      HOMECLOUD_PROXMOX_TOKEN_SECRET:
+      HOMECLOUD_SSH_KEYS:
+      HOMECLOUD_WINDOWS_ADMIN_PASSWORD:
+    volumes:
+      - ../frontend/static:/frontend/static:ro
+
+volumes:
+  pgdata:

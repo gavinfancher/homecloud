@@ -1,0 +1,107 @@
+# The homecloud API and its worker: FastAPI, one container. The pages (frontend/, on
+# homecloud.gavinf.com) call it at homecloud-api.gavinf.com, through the tunnel (cloudflared.yaml).
+# It calls out to the Proxmox API (10.0.4.10:8006) and Postgres (postgres.ad.gavinf.com).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homecloud
+  annotations:
+    secrets.infisical.com/auto-reload: "true" # restart when the `homecloud` Secret changes
+spec:
+  # One. The worker only runs in one pod at a time anyway (a Postgres advisory lock), and the
+  # sign-in throttle is kept in memory.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # the new pod is ready before the old one stops
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: homecloud
+  template:
+    metadata:
+      labels:
+        app: homecloud
+    spec:
+      automountServiceAccountToken: false # it never talks to the Kubernetes API
+      tolerations:
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001 # the `homecloud` user in the Dockerfile
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/gavinfancher/homecloud # tag set in kustomization.yaml
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            # Plain settings. Defaults for the rest are in backend/app/config.py.
+            - name: HOMECLOUD_CORS_ORIGINS
+              value: https://homecloud.gavinf.com
+            - name: HOMECLOUD_PROXMOX_HOST
+              value: "10.0.4.10"
+            - name: HOMECLOUD_PROXMOX_NODE
+              value: pve-root
+            # Secrets, by name; each value comes from the `homecloud` Secret, which the Infisical
+            # operator builds (infisical-secret.yaml). Listed one by one, so the API never
+            # sees TUNNEL_TOKEN.
+            - name: HOMECLOUD_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: homecloud, key: HOMECLOUD_DATABASE_URL } }
+            - name: HOMECLOUD_ADMIN_PASSWORD_HASH
+              valueFrom: { secretKeyRef: { name: homecloud, key: HOMECLOUD_ADMIN_PASSWORD_HASH } }
+            - name: HOMECLOUD_PROXMOX_TOKEN_ID
+              valueFrom: { secretKeyRef: { name: homecloud, key: HOMECLOUD_PROXMOX_TOKEN_ID } }
+            - name: HOMECLOUD_PROXMOX_TOKEN_SECRET
+              valueFrom: { secretKeyRef: { name: homecloud, key: HOMECLOUD_PROXMOX_TOKEN_SECRET } }
+            - name: HOMECLOUD_WINDOWS_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: homecloud, key: HOMECLOUD_WINDOWS_ADMIN_PASSWORD } }
+            - name: HOMECLOUD_SSH_KEYS
+              valueFrom: { secretKeyRef: { name: homecloud, key: HOMECLOUD_SSH_KEYS } }
+          # Liveness never touches the database: a database outage shouldn't restart a process
+          # that's fine.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            failureThreshold: 2
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 32Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homecloud
+spec:
+  selector:
+    app: homecloud
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

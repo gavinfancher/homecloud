@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homecloud
+  labels:
+    # Reject any pod here that runs as root, escalates privileges, or keeps capabilities.
+    pod-security.kubernetes.io/enforce: restricted
