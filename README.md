@@ -59,7 +59,8 @@ A few decisions worth calling out:
 backend/    the API and worker (FastAPI): app/, tests/, Dockerfile, compose.yml for local dev
 frontend/   the pages, CSS and JS (static/), page routes (_redirects), wrangler.jsonc
 deploy/     Kubernetes (k8s/) and the Argo CD Application (argocd/)
-infra/      Terraform for the tunnel and DNS (terraform/), the database setup (sql/)
+infra/      Terraform for the tunnel and DNS (terraform/), the database setup (sql/),
+            Proxmox host tweaks (proxmox/)
 ```
 
 | Piece | Where |
