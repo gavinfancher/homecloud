@@ -40,7 +40,7 @@ PROXMOX_BRIDGE = _env("HOMECLOUD_PROXMOX_BRIDGE", "vmbr0")
 # Every VM homecloud makes goes in this pool; the API token only has rights on it.
 PROXMOX_POOL = _env("HOMECLOUD_PROXMOX_POOL", "homecloud")
 # The web UI, for the "console" link on each VM. Only reachable on the LAN or tailnet.
-PROXMOX_UI = _env("HOMECLOUD_PROXMOX_UI", "https://10.0.4.10:8006")
+PROXMOX_UI = _env("HOMECLOUD_PROXMOX_UI", "https://pve.ad.gavinf.com:8006")
 # New VMs get the lowest free id at or above this, so they're easy to tell apart.
 VMID_START = int(_env("HOMECLOUD_VMID_START", "700"))
 
