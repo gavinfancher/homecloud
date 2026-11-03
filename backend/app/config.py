@@ -35,7 +35,7 @@ PROXMOX_NODE = _env("HOMECLOUD_PROXMOX_NODE", "pve")
 # Where VM disks go.
 PROXMOX_DISK_STORAGE = _env("HOMECLOUD_PROXMOX_DISK_STORAGE", "local-lvm")
 # Directory storage for ISOs and downloaded cloud images: needs the "iso" and "import" content types.
-PROXMOX_FILE_STORAGE = _env("HOMECLOUD_PROXMOX_FILE_STORAGE", "local")
+PROXMOX_FILE_STORAGE = _env("HOMECLOUD_PROXMOX_FILE_STORAGE", "homecloud")
 PROXMOX_BRIDGE = _env("HOMECLOUD_PROXMOX_BRIDGE", "vmbr0")
 # Every VM homecloud makes goes in this pool; the API token only has rights on it.
 PROXMOX_POOL = _env("HOMECLOUD_PROXMOX_POOL", "homecloud")

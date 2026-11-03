@@ -53,14 +53,14 @@ def step_create(vm: dict) -> bool:
         # Saved before anything is made, so a retry (or a delete) finds the same VM.
         if not db.update_vm(vm["name"], only_if="creating", vmid=vmid):
             return False  # deleted meanwhile
-    if pve.exists(vmid):
-        return True  # created on an earlier try
-    if vm["os"] == "ubuntu":
-        seed = pve.upload_iso(media.seed_iso_name(vmid), media.ubuntu_seed(vm["name"]))
-        pve.create_ubuntu(vmid, vm["name"], vm["cores"], vm["memory_mb"], vm["disk_gb"], seed)
-    else:
-        answer = pve.upload_iso(media.seed_iso_name(vmid), media.windows_answer(vm["name"]))
-        pve.create_windows(vmid, vm["name"], vm["cores"], vm["memory_mb"], vm["disk_gb"], answer)
+    if not pve.exists(vmid):  # else: created on an earlier try, maybe not finished
+        if vm["os"] == "ubuntu":
+            seed = pve.upload_iso(media.seed_iso_name(vmid), media.ubuntu_seed(vm["name"]))
+            pve.create_ubuntu(vmid, vm["name"], vm["cores"], vm["memory_mb"], vm["disk_gb"], seed)
+        else:
+            answer = pve.upload_iso(media.seed_iso_name(vmid), media.windows_answer(vm["name"]))
+            pve.create_windows(vmid, vm["name"], vm["cores"], vm["memory_mb"], vm["disk_gb"], answer)
+    pve.finish(vmid, vm["os"], vm["disk_gb"])
     return True
 
 
@@ -115,9 +115,11 @@ def advance(vm: dict) -> None:
 def remove(vm: dict) -> None:
     vmid = vm["vmid"]
     if vmid is not None and pve.exists(vmid):
-        tags = (pve.status_by_vmid()[vmid].get("tags") or "").split(";")
-        if pve.TAG not in tags:
-            raise pve.PveError(f"VM {vmid} isn't tagged '{pve.TAG}'; refusing to delete it")
+        # Ours if it's tagged homecloud or in the homecloud pool (a create that stopped before
+        # tagging leaves it in the pool, untagged).
+        info = pve.status_by_vmid()[vmid]
+        if pve.TAG not in (info.get("tags") or "").split(";") and info.get("pool") != config.PROXMOX_POOL:
+            raise pve.PveError(f"VM {vmid} isn't tagged '{pve.TAG}' or in pool '{config.PROXMOX_POOL}'; refusing to delete it")
         pve.stop(vmid)
         pve.destroy(vmid)
     if vmid is not None:

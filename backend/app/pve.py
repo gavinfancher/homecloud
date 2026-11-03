@@ -7,6 +7,7 @@ a row for, so the rest of the node (the k8s nodes, the DC, ...) is out of its re
 
 import io
 import ipaddress
+import re
 import time
 from functools import cache
 from pathlib import PurePosixPath
@@ -179,16 +180,13 @@ def create_ubuntu(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: int
     image = ubuntu_image()
     disk = config.PROXMOX_DISK_STORAGE
     wait_task(node().qemu.post(
-        vmid=vmid, name=name, pool=config.PROXMOX_POOL, tags=TAG, ostype="l26", machine="q35", cpu="host",
+        vmid=vmid, name=name, pool=config.PROXMOX_POOL, ostype="l26", machine="q35", cpu="host",
         cores=cores, memory=memory_mb, agent="enabled=1",
         scsihw="virtio-scsi-single", scsi0=f"{disk}:0,import-from={image},discard=on,iothread=1",
         ide2=f"{seed},media=cdrom", boot="order=scsi0",
         net0=f"virtio,bridge={config.PROXMOX_BRIDGE}",
         serial0="socket", vga="serial0",  # cloud images talk on the serial console
     ), timeout=900)
-    # The cloud image is a few GB; grow it to the size asked for. Ubuntu grows its filesystem
-    # to fit on first boot.
-    wait_task(qemu(vmid).resize.put(disk="scsi0", size=f"{disk_gb}G"), timeout=300)
 
 
 def create_windows(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: int, answer: str) -> None:
@@ -198,7 +196,7 @@ def create_windows(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: in
     disk = config.PROXMOX_DISK_STORAGE
     virtio = virtio_iso()
     wait_task(node().qemu.post(
-        vmid=vmid, name=name, pool=config.PROXMOX_POOL, tags=TAG, ostype="win11", machine="q35", bios="ovmf", cpu="host",
+        vmid=vmid, name=name, pool=config.PROXMOX_POOL, ostype="win11", machine="q35", bios="ovmf", cpu="host",
         cores=cores, memory=memory_mb, agent="enabled=1",
         efidisk0=f"{disk}:1,efitype=4m,pre-enrolled-keys=1",
         tpmstate0=f"{disk}:1,version=v2.0",
@@ -209,6 +207,24 @@ def create_windows(vmid: int, name: str, cores: int, memory_mb: int, disk_gb: in
         ide1=f"{virtio},media=cdrom",
         boot="order=sata0;ide2",
     ), timeout=900)
+
+
+def finish(vmid: int, os: str, disk_gb: int) -> None:
+    """The rest of creating a VM, once it exists and is in the pool. Safe to repeat.
+
+    Tags can't be set in the create call: Proxmox checks the tag permission on /vms/<id> alone,
+    before the VM joins the pool, and this token only has rights through the pool. Once the VM
+    is in the pool the same check passes.
+    """
+    conf = qemu(vmid).config.get()
+    if TAG not in (conf.get("tags") or "").split(";"):
+        qemu(vmid).config.put(tags=TAG)
+    if os == "ubuntu":
+        # The cloud image is a few GB; grow it to the size asked for (only ever up). Ubuntu
+        # grows its filesystem to fit on first boot.
+        size = re.search(r"size=(\d+)G", conf.get("scsi0", ""))
+        if not size or int(size.group(1)) < disk_gb:
+            wait_task(qemu(vmid).resize.put(disk="scsi0", size=f"{disk_gb}G"), timeout=300)
 
 
 # ---------- power ----------

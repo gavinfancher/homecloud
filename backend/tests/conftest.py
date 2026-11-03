@@ -69,9 +69,14 @@ class FakePve:
         self.isos.discard(volid)
 
     def create_ubuntu(self, vmid, name, cores, memory_mb, disk_gb, seed):
-        self.vms[vmid] = {"name": name, "status": "stopped", "tags": "homecloud", "cds": {"ide2": seed}}
+        # Like Proxmox: created in the pool, untagged; finish() tags it.
+        self.vms[vmid] = {"name": name, "status": "stopped", "tags": "", "pool": "homecloud",
+                          "cds": {"ide2": seed}}
 
     create_windows = create_ubuntu
+
+    def finish(self, vmid, os, disk_gb):
+        self.vms[vmid]["tags"] = "homecloud"
 
     def status(self, vmid):
         return self.vms[vmid]["status"]

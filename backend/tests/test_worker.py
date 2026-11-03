@@ -35,6 +35,32 @@ def test_create_is_resumable(anon, fake_pve):
     assert list(fake_pve.vms) == [700]
 
 
+def test_create_tags_after_joining_pool(anon, fake_pve):
+    """Proxmox won't take tags in the create call from a pool-scoped token, so they come after."""
+    db.add_vm("web1", "ubuntu", 2, 4096, 40)
+    provision.tick({})
+    assert fake_pve.vms[700]["tags"] == "homecloud"
+
+
+def test_create_finishes_after_stopping_before_tags(anon, fake_pve):
+    """The VM exists, in the pool but untagged (the pod died between the two calls)."""
+    fake_pve.finish, real_finish = (lambda *a: (_ for _ in ()).throw(RuntimeError("pod died"))), fake_pve.finish
+    db.add_vm("web1", "ubuntu", 2, 4096, 40)
+    provision.tick({})
+    assert fake_pve.vms[700]["tags"] == "" and db.get_vm("web1")["state"] == "failed"
+    # Deleting it still works: it's in the homecloud pool.
+    db.update_vm("web1", state="deleting")
+    provision.tick({})
+    assert db.get_vm("web1") is None and fake_pve.vms == {}
+
+    fake_pve.finish = real_finish
+    db.add_vm("web2", "ubuntu", 2, 4096, 40)
+    fake_pve.vms[700] = {"name": "web2", "status": "stopped", "tags": "", "pool": "homecloud", "cds": {}}
+    db.update_vm("web2", vmid=700)
+    provision.tick({})  # exists already: just finishes it
+    assert fake_pve.vms[700]["tags"] == "homecloud" and db.get_vm("web2")["step"] == "start"
+
+
 def test_vmids_skip_taken(anon, fake_pve):
     fake_pve.vms[700] = {"name": "other", "status": "running", "tags": ""}
     db.add_vm("web1", "ubuntu", 1, 2048, 20)
@@ -62,7 +88,8 @@ def test_delete_mid_create_wins(anon, fake_pve):
 def test_never_deletes_untagged_vm(anon, fake_pve):
     db.add_vm("web1", "ubuntu", 2, 4096, 40)
     provision.tick({})
-    fake_pve.vms[700]["tags"] = ""  # someone else's VM got this id somehow
+    # Someone else's VM got this id somehow: not tagged, not in the pool.
+    fake_pve.vms[700].update(tags="", pool=None)
     db.update_vm("web1", state="deleting")
     provision.tick({})
     assert 700 in fake_pve.vms

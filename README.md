@@ -105,25 +105,36 @@ them into the `homecloud` Secret and restarts the pods when one changes.
 
 ## Setting it up (once)
 
-1. **Proxmox: a pool, a role, and a token that can only use them.** On the node:
+1. **Proxmox: a pool, a storage, and a token that can only use those.** On the node:
    ```sh
    pveum pool add homecloud --comment "VMs made by homecloud"
+   # Its own directory storage for the seed/answer ISOs and downloaded images. Deleting a file
+   # no VM owns needs Datastore.Allocate, and that's only safe on a storage that's all homecloud's.
+   mkdir -p /var/lib/vz/homecloud
+   pvesm add dir homecloud --path /var/lib/vz/homecloud --content iso,import --create-subdirs 1
+
    pveum role add HomecloudVM --privs "VM.Allocate VM.Audit VM.Config.CDROM VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.PowerMgmt VM.GuestAgent.Audit"
+   pveum role add HomecloudFiles --privs "Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit"
    pveum role add HomecloudStorage --privs "Datastore.Audit Datastore.AllocateSpace Datastore.AllocateTemplate"
-   pveum user add homecloud@pve --comment "homecloud API"
-   pveum acl modify /pool/homecloud --users homecloud@pve --roles HomecloudVM
-   pveum acl modify /storage/local --users homecloud@pve --roles HomecloudStorage
-   pveum acl modify /storage/local-lvm --users homecloud@pve --roles HomecloudStorage
-   pveum acl modify /sdn/zones/localnetwork --users homecloud@pve --roles PVESDNUser
-   # download-url (fetching the Ubuntu image) also needs these on the node. Sys.AccessNetwork
-   # is the narrow choice; the alternative it accepts is Sys.Modify on / (the whole datacenter).
-   pveum acl modify /nodes/pve --users homecloud@pve --roles PVEAuditor
+   pveum role add HomecloudRead --privs "Datastore.Audit"
+   # download-url needs Sys.AccessNetwork on the node (or Sys.Modify on /, the whole datacenter)
    pveum role add HomecloudDownload --privs "Sys.AccessNetwork"
-   pveum acl modify /nodes/pve --users homecloud@pve --roles HomecloudDownload
+
+   pveum user add homecloud@pve --comment "homecloud API"
+   pveum acl modify /pool/homecloud    --users homecloud@pve --roles HomecloudVM
+   pveum acl modify /storage/homecloud --users homecloud@pve --roles HomecloudFiles
+   pveum acl modify /storage/local-lvm --users homecloud@pve --roles HomecloudStorage   # VM disks
+   pveum acl modify /storage/local     --users homecloud@pve --roles HomecloudRead      # the Windows ISO
+   pveum acl modify /sdn/zones/localnetwork --users homecloud@pve --roles PVESDNUser
+   pveum acl modify /nodes/pve --users homecloud@pve --roles PVEAuditor,HomecloudDownload
    pveum user token add homecloud@pve homecloud --privsep 0   # prints the secret once
    ```
-   The `local` storage needs the `iso` and `import` content types (it has both), and the
-   Windows 11 ISO at `local:iso/Win11-Enterprise-eval.iso`.
+   The Windows 11 ISO goes at `local:iso/Win11-Enterprise-eval.iso`.
+
+   Two Proxmox quirks shape `backend/app/pve.py`: a VM is created untagged and tagged right
+   after, because the create call checks the tag permission on `/vms/<id>` before the VM has
+   joined the pool; and the token is never given `Datastore.Allocate` on `local`, where it
+   would let it delete backups and other ISOs.
 2. **Postgres**: run `infra/sql/roles.sql` once against `postgres.ad.gavinf.com` (the commands
    are at the top of the file) and put the URL it prints in Infisical.
 3. **Terraform** makes the tunnel and `homecloud-api.gavinf.com`. The API token needs

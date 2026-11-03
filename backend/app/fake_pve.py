@@ -63,6 +63,10 @@ def create_windows(vmid, name, cores, memory_mb, disk_gb, answer):
     _create("windows", vmid, name)
 
 
+def finish(vmid: int, os: str, disk_gb: int) -> None:
+    pass
+
+
 def status(vmid: int) -> str:
     return _vms[vmid]["status"]
 
