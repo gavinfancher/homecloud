@@ -116,9 +116,9 @@ them into the `homecloud` Secret and restarts the pods when one changes.
    pveum acl modify /storage/local-lvm --users homecloud@pve --roles HomecloudStorage
    pveum acl modify /sdn/zones/localnetwork --users homecloud@pve --roles PVESDNUser
    # download-url (fetching the Ubuntu image) also needs these on the node:
-   pveum acl modify /nodes/pve-root --users homecloud@pve --roles PVEAuditor
+   pveum acl modify /nodes/pve --users homecloud@pve --roles PVEAuditor
    pveum role add HomecloudDownload --privs "Sys.Modify"
-   pveum acl modify /nodes/pve-root --users homecloud@pve --roles HomecloudDownload
+   pveum acl modify /nodes/pve --users homecloud@pve --roles HomecloudDownload
    pveum user token add homecloud@pve homecloud --privsep 0   # prints the secret once
    ```
    The `local` storage needs the `iso` and `import` content types (it has both), and the

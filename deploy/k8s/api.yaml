@@ -53,7 +53,7 @@ spec:
             - name: HOMECLOUD_PROXMOX_HOST
               value: "10.0.4.10"
             - name: HOMECLOUD_PROXMOX_NODE
-              value: pve-root
+              value: pve
             # Secrets, by name; each value comes from the `homecloud` Secret, which the Infisical
             # operator builds (infisical-secret.yaml). Listed one by one, so the API never
             # sees TUNNEL_TOKEN.

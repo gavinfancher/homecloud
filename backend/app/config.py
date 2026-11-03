@@ -31,7 +31,7 @@ PROXMOX_TOKEN_ID = _env("HOMECLOUD_PROXMOX_TOKEN_ID")
 PROXMOX_TOKEN_SECRET = _env("HOMECLOUD_PROXMOX_TOKEN_SECRET")
 # Proxmox ships a self-signed certificate; the API is only reached on the LAN.
 PROXMOX_VERIFY_TLS = _env("HOMECLOUD_PROXMOX_VERIFY_TLS", "false").lower() == "true"
-PROXMOX_NODE = _env("HOMECLOUD_PROXMOX_NODE", "pve-root")
+PROXMOX_NODE = _env("HOMECLOUD_PROXMOX_NODE", "pve")
 # Where VM disks go.
 PROXMOX_DISK_STORAGE = _env("HOMECLOUD_PROXMOX_DISK_STORAGE", "local-lvm")
 # Directory storage for ISOs and downloaded cloud images: needs the "iso" and "import" content types.
