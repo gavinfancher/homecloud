@@ -188,7 +188,7 @@ function vmRow(vm) {
     ),
     el('div', { class: 'vm-sub' }, `${vm.cores} vCPU · ${vm.memory_gb} GB · ${vm.disk_gb} GB disk`),
     el('div', {},
-      el('div', { class: 'vm-status' }, el('span', { class: 'dot ' + dot }), text),
+      el('div', { class: 'vm-status' }, el('span', { class: 'dot ' + dot }), el('span', {}, text)),
       vm.error && el('div', { class: 'vm-error' }, vm.error),
       // While it's working, the latest thing the worker did.
       !vm.error && vm.last_event && (vm.state === 'creating' || vm.state === 'deleting') &&

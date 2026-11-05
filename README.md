@@ -166,6 +166,50 @@ them into the `homecloud` Secret and restarts the pods when one changes.
    `gavinfancher/homecloud`, root directory `frontend`, build `npm run build`, deploy
    `npx wrangler deploy`. The Worker's name must match `name` in `frontend/wrangler.jsonc`.
 
+## When something fails
+
+| Failure | What happens |
+| --- | --- |
+| A step hangs (Proxmox slow, guest agent never reports) | Each step has a timeout (15 min by default; Ubuntu wait 20 min, Windows wait 90 min, first create 60 min for the image download). Past it, the VM is marked **failed** with the step and the error. |
+| A Proxmox task fails | The VM is marked **failed**, and the tail of Proxmox's own task log goes into the VM's log, so the real reason is one click away. |
+| A delete fails | It stays **deleting** and retries every 5 s until it works, logging each new error once. |
+| The pod restarts mid-create (deploy, node reboot) | The next pod picks up at the same step. Every step checks what Proxmox already has, so nothing is created twice. |
+| Two pods overlap during a rolling update | A Postgres advisory lock keeps it to one worker. |
+| Postgres down | `/readyz` returns 503 and the pod leaves the Service. The worker logs the error and retries. |
+| The cluster or home network is down | The site shows a Cloudflare error. VMs already made keep running: they live on Proxmox, not in homecloud. |
+
+## What broke and how I fixed it
+
+**Every clone got the same IP address** (v1). VMs were cloned from a template, and two of them
+sat on the same IP, ARP-fighting so that one was unreachable. systemd-networkd builds its DHCP
+client ID from `/etc/machine-id`, and every clone had the template's. The template prep *did*
+clear machine-id, but it ran through the guest agent's fire-and-forget exec, and the build then
+hard-stopped the VM with no `sync`, so the change died in the page cache. Fixed three ways: wait
+for the command and `sync` before stopping, refuse to make a template that still has a
+machine-id, and set `dhcp-identifier: mac` so DHCP identity follows each clone's own MAC
+(`d76dbd9`).
+
+**The locked-down token couldn't create VMs with tags.** Proxmox checks the tag permission on
+`/vms/<id>` during create, before the VM has joined the pool the token is scoped to. Giving the
+token wider rights would have defeated the point, so homecloud now creates untagged and tags
+right after, in a step that's safe to repeat (`fbceb9e`).
+
+**Deleting an ISO needed a dangerous permission.** Removing the seed ISO needs
+`Datastore.Allocate`. On the shared `local` storage, that would let the token delete backups
+and every other ISO. homecloud got its own `homecloud` storage instead, and the token is
+read-only on `local`.
+
+## Known gaps
+
+- **One replica.** If its worker node dies, the site is down until the pod is rescheduled (about
+  a minute). Nothing in flight is lost: the worker resumes.
+- **No database backups.** Postgres (`postgres.ad.gavinf.com`) is one box shared with wishly and
+  easydocs, with no backups.
+- **No alerting.** A VM stuck in **failed** is only seen in the UI.
+- **One Windows admin password** for every Windows VM. Fine for throwaway lab VMs, but it should
+  be generated per VM and shown once.
+- **One Proxmox host.** If it's down, there's nothing to create VMs on.
+
 ## Local dev
 
 ```sh

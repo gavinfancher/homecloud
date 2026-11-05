@@ -102,24 +102,30 @@ input:focus { outline: none; border-color: var(--accent); }
 .error-text { color: var(--danger); font-size: 13px; }
 
 /* ── VM list ────────────────────────────────────────── */
-.vms { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.vms {
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  /* Columns live here so every row lines up, even when rows have different buttons. */
+  display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(0, 1.4fr) auto; column-gap: 16px;
+}
+.vms > * { grid-column: 1 / -1; }
 .vm {
-  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.3fr) minmax(0, 1.1fr) auto;
-  gap: 16px; align-items: center; padding: 14px 18px; background: var(--panel);
+  display: grid; grid-template-columns: subgrid;
+  row-gap: 16px; align-items: center; padding: 14px 18px; background: var(--panel);
 }
 .vms > * + * { border-top: 1px solid var(--border); }
 .vm-name { font-family: var(--mono); font-weight: 600; font-size: 14px; }
 .vm-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .vm-ip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 5px; font-size: 12.5px; }
-.vm-connect { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-left: 4px; }
+.vm-connect { white-space: nowrap; font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-left: 4px; }
 .copy {
   display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; cursor: pointer;
   color: var(--faint); background: none; border: 1px solid transparent; border-radius: var(--radius-sm);
 }
 .copy:hover { color: var(--text); border-color: var(--border); background: var(--panel-2); }
 .copy.done { color: var(--accent); }
-.uptime { font-variant-numeric: tabular-nums; }
-.vm-status { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.uptime { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vm-status { display: flex; align-items: flex-start; gap: 7px; font-size: 13px; line-height: 1.5; }
+.vm-status .dot { margin-top: 6px; }
 .vm-error { font-size: 12px; color: var(--danger); margin-top: 3px; word-break: break-word; }
 .vm-last { font-size: 12px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -157,6 +163,7 @@ input:focus { outline: none; border-color: var(--accent); }
   .header { padding: 0 16px; }
   .page { padding: 24px 16px 48px; }
   .create .row { grid-template-columns: 1fr; }
+  .vms { display: block; }
   .vm { grid-template-columns: 1fr; gap: 8px; }
   .vm-actions { justify-content: flex-start; }
   .vm-log { padding: 12px 16px 14px; }
